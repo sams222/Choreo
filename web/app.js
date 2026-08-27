@@ -64,6 +64,7 @@ const els = {
 let lastTask = null;
 let reachable = true;
 let pollInFlight = false;
+let pollPaused = false;
 
 function setUnreachable(isUnreachable) {
   reachable = !isUnreachable;
@@ -178,7 +179,7 @@ async function fetchState() {
 }
 
 async function poll() {
-  if (pollInFlight) return;
+  if (pollPaused || pollInFlight) return;
   pollInFlight = true;
   try {
     const snapshot = await fetchState();
@@ -259,3 +260,8 @@ els.provider.addEventListener('change', () => {
 
 poll();
 setInterval(poll, POLL_MS);
+
+globalThis.render = render;
+globalThis.pausePoll = () => {
+  pollPaused = true;
+};
