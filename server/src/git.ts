@@ -120,12 +120,38 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
 
   async function getDiff(dir: string) {
     const head = await runGit(dir, ['diff', 'HEAD'], { allowFail: true });
-    const vsHead = head.stdout;
-    if (vsHead.trim() !== '') {
-      return vsHead;
+    const chunks = head.stdout.trim() === '' ? [] : [head.stdout];
+    const status = await runGit(
+      dir,
+      ['status', '--porcelain', '--untracked-files=all'],
+      { allowFail: true },
+    );
+    const untracked = status.stdout
+      .split('\n')
+      .filter((line) => line.startsWith('?? '))
+      .map((line) => porcelainPath(line))
+      .filter(Boolean);
+    for (const rel of untracked) {
+      const file = path.join(dir, rel);
+      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+        continue;
+      }
+      const patch = await runGit(
+        dir,
+        [
+          'diff',
+          '--no-index',
+          '--',
+          process.platform === 'win32' ? 'NUL' : '/dev/null',
+          rel,
+        ],
+        { allowFail: true },
+      );
+      if (patch.stdout.trim() !== '') {
+        chunks.push(patch.stdout);
+      }
     }
-    const cached = await runGit(dir, ['diff', '--cached'], { allowFail: true });
-    return cached.stdout;
+    return chunks.join('\n');
   }
 
   async function commitIfDirty(

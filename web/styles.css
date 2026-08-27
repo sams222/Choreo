@@ -30,11 +30,6 @@ button { color: inherit; }
 /* Header */
 .top { display: grid; grid-template-columns: minmax(190px, 1fr) minmax(280px, auto) minmax(190px, 1fr); gap: 24px; align-items: center; padding: 0 28px; border-bottom: 1px solid var(--border); background: rgba(8, 8, 8, .92); backdrop-filter: blur(16px); }
 .brand { display: flex; align-items: center; gap: 10px; width: max-content; min-width: 0; }
-.brand-mark { position: relative; width: 29px; height: 29px; border: 1px solid #60351d; border-radius: 8px; background: #17100c; }
-.brand-mark i { position: absolute; width: 9px; height: 9px; border: 1.5px solid var(--accent); border-radius: 50%; }
-.brand-mark i:first-child { top: 5px; left: 5px; }
-.brand-mark i:last-child { right: 5px; bottom: 5px; }
-.brand-mark::after { content: ""; position: absolute; width: 7px; height: 1px; top: 13px; left: 10px; background: var(--accent); transform: rotate(45deg); opacity: .7; }
 .brand-name { margin: 0; color: var(--text); font-size: 16px; font-weight: 650; letter-spacing: -.025em; }
 .head-mid { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .head-right { display: flex; align-items: center; justify-content: flex-end; gap: 9px; min-width: 0; }

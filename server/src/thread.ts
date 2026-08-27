@@ -267,7 +267,15 @@ export function buildThread(snapshot: ServerSnapshot): ThreadItem[] {
     }
   }
 
-  if (project?.shards && parallel && parallelLive.length === 0) {
+  const parallelSucceeded = parallel?.every(
+    (task) => task.status === 'succeeded',
+  );
+  if (
+    project?.shards &&
+    parallel &&
+    parallelLive.length === 0 &&
+    parallelSucceeded
+  ) {
     items.push({
       id: 'merge',
       ts: Date.now(),

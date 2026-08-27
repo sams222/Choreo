@@ -1000,7 +1000,6 @@ async function createProject(goal) {
       ...(els.sourceDir.value.trim() ? { sourceDir: els.sourceDir.value.trim() } : {}),
       writerProvider: els.provider.value,
       maxIterations: Number.isFinite(attempts) && attempts > 0 ? attempts : 5,
-      testCommand: ['node', '--test'],
       ...(els.reviewerProvider?.value
         ? { reviewerProvider: els.reviewerProvider.value }
         : {}),

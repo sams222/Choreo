@@ -15,6 +15,7 @@ import {
   inferJobKind,
   parsePlanObject,
   planObjectPrompt,
+  pythonTestCommand,
   steerPrompt,
   workspaceRoot,
   type AgentEvent,
@@ -41,6 +42,18 @@ const WEB_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../web',
 );
+
+export function inferProjectTestCommand(
+  goal: string,
+  paths: readonly string[] = [],
+): string[] {
+  const usesPython =
+    paths.some((file) => /\.py$/i.test(file)) ||
+    /\b(python|pytest|unittest)\b/i.test(goal);
+  return usesPython
+    ? pythonTestCommand(paths.filter((file) => /\.py$/i.test(file)))
+    : [...DEFAULT_TEST_COMMAND];
+}
 
 function isProvider(value: unknown): value is ProviderType {
   return value === 'claude' || value === 'codex';
@@ -554,14 +567,21 @@ export function createHttpApp(deps: {
     try {
       await git.mergeShards(project.workspaceDir, shards.testsDir, shards.codeDir);
       const testFiles = await git.listTestFiles(project.workspaceDir);
+      const usingPythonDiscovery =
+        project.testCommand.join('\0') ===
+        ['python3', '-m', 'unittest', 'discover'].join('\0');
+      const testCommand = usingPythonDiscovery
+        ? pythonTestCommand(testFiles)
+        : project.testCommand;
       store.updateProject({
         oraclePaths: testFiles,
+        testCommand,
         frozenAt: monotonicNow(),
       });
       const ctx = {
         sourceDir: project.sourceDir,
         oraclePaths: testFiles,
-        testCommand: project.testCommand,
+        testCommand,
         persistDir: project.workspaceDir,
         empty: !project.sourceDir,
         mode: 'code' as JobKind,
@@ -762,6 +782,18 @@ export function createHttpApp(deps: {
       if (project.plan.some((item) => item.status === 'running')) {
         return;
       }
+      const shardFailed = project.plan.some(
+        (item) =>
+          (inferJobKind(item) === 'tests' || inferJobKind(item) === 'code') &&
+          item.status === 'failed',
+      );
+      if (shardFailed) {
+        // A failed lane is terminal after its recovery cap. Leaving shards set
+        // makes the UI claim a merge is running and blocks further steering.
+        store.updateProject({ shards: undefined });
+        markReadyIfComplete();
+        return;
+      }
     }
     startEligibleItems();
     drainSteeringIntoRun();
@@ -872,10 +904,12 @@ export function createHttpApp(deps: {
       parsed.oraclePaths && parsed.oraclePaths.length > 0
         ? parsed.oraclePaths
         : existingTests;
-    const testCommand =
-      parsed.testCommand && parsed.testCommand.length > 0
-        ? parsed.testCommand
-        : [...DEFAULT_TEST_COMMAND];
+    const explicitTestCommand = Boolean(
+      parsed.testCommand && parsed.testCommand.length > 0,
+    );
+    const testCommand = explicitTestCommand
+      ? parsed.testCommand!
+      : inferProjectTestCommand(parsed.goal, oraclePaths);
     const projectId = store.newProjectId();
     const workspaceDir = path.join(workspaceRoot(), projectId);
     const involved = involvedFromProject(
@@ -936,7 +970,18 @@ export function createHttpApp(deps: {
         fallback,
         ensureTests: !hasTests,
         involved,
-        after: () => startEligibleItems(),
+        after: (plan) => {
+          if (!explicitTestCommand) {
+            const plannedPaths = plan.items.flatMap((item) => item.files ?? []);
+            store.updateProject({
+              testCommand: inferProjectTestCommand(parsed.goal, [
+                ...oraclePaths,
+                ...plannedPaths,
+              ]),
+            });
+          }
+          startEligibleItems();
+        },
       });
       return;
     }

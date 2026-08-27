@@ -6,10 +6,19 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
-import { defaultBuildPlan, parsePlanObject } from '../../protocol/index.ts';
+import {
+  defaultBuildPlan,
+  isTestPath,
+  parsePlanObject,
+  reviewPrompt,
+} from '../../protocol/index.ts';
 import { createAdapters } from './adapters.ts';
 import { createGitRuntime } from './git.ts';
-import { createHttpApp, dashboardDefaults } from './http.ts';
+import {
+  createHttpApp,
+  dashboardDefaults,
+  inferProjectTestCommand,
+} from './http.ts';
 import { createStore } from './state.ts';
 import type { CLIAdapter, ProviderType } from '../../protocol/index.ts';
 
@@ -88,6 +97,37 @@ PLAN_DONE`);
   assert.equal(plan.items[1]?.kind, 'code');
 });
 
+test('Python test conventions and default runner are detected', () => {
+  assert.equal(isTestPath('calcapp/test_sqrt.py'), true);
+  assert.equal(isTestPath('calcapp/sqrt_test.py'), true);
+  assert.equal(isTestPath('calcapp/sqrt.py'), false);
+  assert.deepEqual(inferProjectTestCommand('make this in Python'), [
+    'python3',
+    '-m',
+    'unittest',
+    'discover',
+  ]);
+  assert.deepEqual(
+    inferProjectTestCommand('implement it', ['calcapp/test_sqrt.py']),
+    ['python3', '-m', 'unittest', 'calcapp/test_sqrt.py'],
+  );
+  assert.deepEqual(inferProjectTestCommand('implement it', ['sqrt.test.js']), [
+    'node',
+    '--test',
+  ]);
+});
+
+test('review context identifies frozen tests as an intentional baseline', () => {
+  const prompt = reviewPrompt(
+    'diff --git a/sqrt.py b/sqrt.py',
+    'implement sqrt',
+    ['calcapp/test_sqrt.py'],
+  );
+  assert.match(prompt, /FROZEN TEST BASELINE/);
+  assert.match(prompt, /calcapp\/test_sqrt\.py/);
+  assert.match(prompt, /Do not reject.*did not exist/s);
+});
+
 test('empty workspace: tests then implementation, no fixture parse.js', async () => {
   const git = createGitRuntime(fixtureDir);
   const persistDir = path.join(os.tmpdir(), `loopsync-empty-${Date.now()}`);
@@ -123,6 +163,32 @@ test('empty workspace: tests then implementation, no fixture parse.js', async ()
   assert.equal(oracle.dirty, true);
 });
 
+test('Python test files are listed and merged from a test shard', async () => {
+  const git = createGitRuntime(fixtureDir);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'loopsync-python-shards-'));
+  const dest = path.join(root, 'dest');
+  const testsDir = path.join(root, 'tests');
+  const codeDir = path.join(root, 'code');
+  after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(testsDir, 'calcapp'), { recursive: true });
+  fs.mkdirSync(path.join(codeDir, 'calcapp'), { recursive: true });
+  fs.writeFileSync(
+    path.join(testsDir, 'calcapp', 'test_sqrt.py'),
+    'import unittest\n',
+  );
+  fs.writeFileSync(
+    path.join(codeDir, 'calcapp', 'sqrt.py'),
+    'def square_root(value):\n    return value\n',
+  );
+
+  assert.deepEqual(await git.listTestFiles(testsDir), [
+    'calcapp/test_sqrt.py',
+  ]);
+  await git.mergeShards(dest, testsDir, codeDir);
+  assert.equal(fs.existsSync(path.join(dest, 'calcapp', 'test_sqrt.py')), true);
+  assert.equal(fs.existsSync(path.join(dest, 'calcapp', 'sqrt.py')), true);
+});
+
 test('fixture workspace still requires parse.js', async () => {
   const git = createGitRuntime(fixtureDir);
   const workspace = await git.createWorkspace(`fix_${Date.now()}`);
@@ -132,7 +198,10 @@ test('fixture workspace still requires parse.js', async () => {
   assert.equal(tests.passed, false);
 });
 
-function makeTestAdapters(opts?: { tamper?: boolean }): Record<ProviderType, CLIAdapter> {
+function makeTestAdapters(opts?: {
+  tamper?: boolean;
+  missingTests?: boolean;
+}): Record<ProviderType, CLIAdapter> {
   const writePkg = (workspaceDir: string) => {
     fs.writeFileSync(
       path.join(workspaceDir, 'package.json'),
@@ -164,6 +233,9 @@ function makeTestAdapters(opts?: { tamper?: boolean }): Record<ProviderType, CLI
     async run(workspaceDir, prompt, onLog) {
       onLog('planning');
       if (/tests only|Write automated tests only/i.test(prompt)) {
+        if (opts?.missingTests) {
+          return { output: 'described tests but wrote nothing', exitCode: 0 };
+        }
         fs.writeFileSync(
           path.join(workspaceDir, 'package.json'),
           '{"type":"module"}\n',
@@ -236,6 +308,7 @@ type Snapshot = {
     shards?: { testsDir: string; codeDir: string };
   };
   defaults?: { sourceDir: string; goal: string };
+  thread?: Array<{ kind: string }>;
 };
 
 async function json<T = Record<string, unknown>>(
@@ -385,5 +458,42 @@ test('tampering with frozen tests is ORACLE_TAMPERED', async () => {
   });
   assert.match(failed.lastError ?? '', /ORACLE_TAMPERED/);
   assert.equal(failed.commitSha, undefined);
+  await fetch(`${base}/api/reset`, { method: 'POST' });
+});
+
+test('a failed parallel test lane clears shards instead of hanging on merge', async () => {
+  const store = createStore(dashboardDefaults());
+  const git = createGitRuntime(fixtureDir);
+  const app = createHttpApp({
+    store,
+    git,
+    adapters: makeTestAdapters({ missingTests: true }),
+    repoRoot,
+  });
+  const { base } = await listen(app);
+  const created = await json<{ projectId: string }>(base, '/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Integer square root',
+      goal: 'Implement integerSqrt so integerSqrt(9) === 3.',
+      plannerProvider: 'claude',
+      writerProvider: 'codex',
+      maxIterations: 1,
+    }),
+  });
+  assert.equal(created.res.status, 201, JSON.stringify(created.body));
+
+  const settled = await waitUntil(async () => {
+    const { body } = await json<Snapshot>(base, '/api/state');
+    const tests = body.project?.plan.find((item) => item.kind === 'tests');
+    const code = body.project?.plan.find((item) => item.kind === 'code');
+    return tests?.status === 'failed' && code?.status === 'succeeded'
+      ? body
+      : null;
+  });
+  assert.equal(settled.project?.shards, undefined);
+  assert.equal(settled.thread?.some((item) => item.kind === 'merge'), false);
+
   await fetch(`${base}/api/reset`, { method: 'POST' });
 });

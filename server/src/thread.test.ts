@@ -184,6 +184,28 @@ test('the parallel card keeps both lanes when tests finish first', () => {
   );
 });
 
+test('a failed parallel lane never renders as a merge', () => {
+  const tests = task({
+    id: 'task_tests',
+    status: 'failed',
+    endedAt: T0 + 300,
+  });
+  const code = task({
+    id: 'task_code',
+    jobKind: 'code',
+    provider: 'codex',
+    status: 'succeeded',
+    endedAt: T0 + 250,
+  });
+  const base = snapshot({ tasks: [tests, code] });
+  base.project!.shards = { testsDir: '/tmp/a', codeDir: '/tmp/b' };
+
+  assert.equal(
+    buildThread(base).some((item) => item.kind === 'merge'),
+    false,
+  );
+});
+
 test('a single in-flight task gets its own live card with steps', () => {
   const base = snapshot({ tasks: [task()] });
   const live = buildThread(base).find((item) => item.kind === 'live');

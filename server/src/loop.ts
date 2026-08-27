@@ -3,6 +3,7 @@ import {
   monotonicNow,
   parsePlanObject,
   parseReviewVerdict,
+  pythonTestCommand,
   planObjectPrompt,
   planPrompt,
   projectWriterPrompt,
@@ -356,7 +357,17 @@ async function executeLoop(opts: {
         const parallelShard = Boolean(store.getProject()?.shards);
         if (initial.projectId && !parallelShard) {
           // §4 — the freeze is a beat in the thread, not a silent field change.
-          store.updateProject({ oraclePaths: testFiles, frozenAt: monotonicNow() });
+          const project = store.getProject();
+          const usingPythonDiscovery =
+            project?.testCommand.join('\0') ===
+            ['python3', '-m', 'unittest', 'discover'].join('\0');
+          store.updateProject({
+            oraclePaths: testFiles,
+            frozenAt: monotonicNow(),
+            ...(usingPythonDiscovery
+              ? { testCommand: pythonTestCommand(testFiles) }
+              : {}),
+          });
         }
         await refreshOutputs(store, git, taskId, workspaceDir, {
           ...ctx,
@@ -503,7 +514,7 @@ async function executeLoop(opts: {
           provider: reviewerProvider,
           role: 'review',
           workspaceDir,
-          prompt: reviewPrompt(diff, prompt),
+          prompt: reviewPrompt(diff, prompt, ctx?.oraclePaths ?? []),
           signal,
         });
         reviewOutput = result.output;

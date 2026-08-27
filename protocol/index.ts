@@ -547,6 +547,18 @@ export function workspaceRoot(): string {
 export const ORACLE_PATHS = ['parse.test.js'] as const;
 export const SQRT_ORACLE_PATHS = ['sqrt.test.js'] as const;
 export const DEFAULT_TEST_COMMAND = ['node', '--test'] as const;
+export const DEFAULT_PYTHON_TEST_COMMAND = [
+  'python3',
+  '-m',
+  'unittest',
+  'discover',
+] as const;
+
+export function pythonTestCommand(testFiles: readonly string[] = []): string[] {
+  return testFiles.length > 0
+    ? ['python3', '-m', 'unittest', ...testFiles]
+    : [...DEFAULT_PYTHON_TEST_COMMAND];
+}
 export const REVIEW_OK = 'REVIEW_OK';
 export const REVIEW_REJECT = 'REVIEW_REJECT';
 
@@ -667,13 +679,20 @@ ${plan}
 Follow the plan. Do not change the test. Do not ask questions. Do not run git commit.`;
 }
 
-export function reviewPrompt(diff: string, userTask: string): string {
+export function reviewPrompt(
+  diff: string,
+  userTask: string,
+  frozenTests: readonly string[] = [],
+): string {
+  const oracleContext = frozenTests.length
+    ? `\n\nFROZEN TEST BASELINE:\n${frozenTests.join('\n')}\nThese tests were intentionally authored by a separate test lane and committed before implementation began. Do not reject the implementation merely because these files did not exist in the user's original project. Choreo independently verifies that the implementation did not modify them after they froze.`
+    : '';
   return `You are an adversarial reviewer in a separate context from the writer. You did not write this code. Your only job is to find bugs and reasons the change does not work.
 
 User task:
 ${userTask}
 
-Inspect the workspace and this diff. Do not change any files. Do not run git commit. Do not change test files.
+Inspect the workspace and this diff. Do not change any files. Do not run git commit. Do not change test files.${oracleContext}
 
 DIFF:
 ${diff || '(no unstaged diff)'}
@@ -860,7 +879,7 @@ export function isTestPath(rel: string): boolean {
   const base = rel.split(/[/\\]/).pop() ?? rel;
   return (
     /\.(test|spec)\.(js|mjs|cjs|ts)$/i.test(base) ||
-    /(_test|\.test)\.py$/i.test(base)
+    /(^test.*|_test|\.test)\.py$/i.test(base)
   );
 }
 
