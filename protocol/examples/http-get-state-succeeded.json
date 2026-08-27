@@ -8,7 +8,7 @@
       "status": "succeeded",
       "currentIteration": 1,
       "maxIterations": 2,
-      "workspaceDir": "/tmp/loopsync-workspaces/task_01hxyz",
+      "workspaceDir": "/tmp/choreo-workspaces/task_01hxyz",
       "logs": [
         "[loop] attempt 1/2 provider=codex",
         "[codex] Updated parseIndex to return text.length.",

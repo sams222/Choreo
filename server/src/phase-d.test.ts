@@ -28,7 +28,7 @@ const fixtureDir = path.join(repoRoot, 'fixture');
 // Test files run in parallel processes and /api/reset wipes the whole root,
 // so each file gets its own.
 const WORKSPACES = fs.mkdtempSync(path.join(os.tmpdir(), 'loopsync-phase-d-'));
-process.env.LOOPSYNC_WORKSPACE_ROOT = WORKSPACES;
+process.env.CHOREO_WORKSPACE_ROOT = WORKSPACES;
 
 const TEST_FILE = `import { test } from 'node:test';
 import assert from 'node:assert/strict';

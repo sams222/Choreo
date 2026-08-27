@@ -79,7 +79,7 @@ test('full pipeline retries red tests, honors review, commits, and applies', asy
   const sourceDir = path.join(root, 'project');
   const workspaces = path.join(root, 'workspaces');
   fs.mkdirSync(sourceDir, { recursive: true });
-  process.env.LOOPSYNC_WORKSPACE_ROOT = workspaces;
+  process.env.CHOREO_WORKSPACE_ROOT = workspaces;
 
   let codeWrites = 0;
   let reviews = 0;

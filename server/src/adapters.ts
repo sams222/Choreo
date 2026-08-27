@@ -28,7 +28,8 @@ function killProcessGroup(pid: number, signal: NodeJS.Signals): void {
 }
 
 function commandsFor(provider: ProviderType) {
-  const plain = process.env.LOOPSYNC_PLAIN_CLI === '1';
+  const plain =
+    (process.env.CHOREO_PLAIN_CLI ?? process.env.LOOPSYNC_PLAIN_CLI) === '1';
   return plain ? PROVIDER_COMMANDS_PLAIN[provider] : PROVIDER_COMMANDS[provider];
 }
 

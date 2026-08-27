@@ -84,7 +84,7 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
         await runGit(dir, ['add', '-A']);
         await runGit(
           dir,
-          ['commit', '-m', 'loopsync baseline', '--allow-empty', '--no-verify'],
+          ['commit', '-m', 'choreo baseline', '--allow-empty', '--no-verify'],
           { env: { GIT_EDITOR: 'true' } },
         );
       } else {
@@ -94,7 +94,7 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
         });
       }
     }
-    await runGit(dir, ['checkout', '-B', `loopsync/${taskId}`]);
+    await runGit(dir, ['checkout', '-B', `choreo/${taskId}`]);
 
     if (!ctx?.sourceDir && !persistDir && !empty) {
       if (
@@ -105,7 +105,7 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
       }
     }
 
-    return { dir, branch: `loopsync/${taskId}` };
+    return { dir, branch: `choreo/${taskId}` };
   }
 
   async function runTests(dir: string, ctx?: WorkspaceContext) {

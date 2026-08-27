@@ -107,7 +107,7 @@ Each phase has a gate. Do not start the next until the gate is true. UI polish c
 **Build:**
 
 - `Project`: `{ id, root, goal, testCommand, oraclePaths[], defaultAgents }`
-- Copy `root` (user path or uploaded zip) into `/tmp/loopsync-workspaces/<projectId>/<itemId>` — same isolation as today.
+- Copy `root` (user path or uploaded zip) into `/tmp/choreo-workspaces/<projectId>/<itemId>` — same isolation as today.
 - `testCommand` default `node --test`; allow `python -m pytest` etc. Still `shell: false` (argv array).
 - Oracle lock uses `oraclePaths` from the project, not a hardcoded `parse.test.js`.
 - Homework `fixture/` remains a **demo project**, not the only project.
@@ -116,7 +116,7 @@ Each phase has a gate. Do not start the next until the gate is true. UI polish c
 
 **Gate D:** User launches “add `integerSqrt` in `sqrt.js`” against `examples/sqrt`, whose tests assert `integerSqrt(9) === 3`. SHA contains `sqrt.js`. `parse.js` is never touched. Editing `sqrt.test.js` still yields `ORACLE_TAMPERED`. (Shipped with `node --test`, not pytest.)
 
-**Status:** shipped. `POST /api/projects` + per-project `sourceDir` / `testCommand` / `oraclePaths`. Persistent workspace at `/tmp/loopsync-workspaces/<projId>` (not recopied on follow-up). Gate 2 `POST /api/tasks` without `projectId` still copies `fixture/`.
+**Status:** shipped. `POST /api/projects` + per-project `sourceDir` / `testCommand` / `oraclePaths`. Persistent workspace at `/tmp/choreo-workspaces/<projId>` (not recopied on follow-up). The compatibility `POST /api/tasks` route still copies `fixture/`.
 
 ### Phase E — Plan as an object, plus a steering thread
 

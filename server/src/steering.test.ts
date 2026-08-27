@@ -23,7 +23,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const fixtureDir = path.join(repoRoot, 'fixture');
 
 // Test files run in parallel processes and /api/reset wipes the whole root.
-process.env.LOOPSYNC_WORKSPACE_ROOT = fs.mkdtempSync(
+process.env.CHOREO_WORKSPACE_ROOT = fs.mkdtempSync(
   path.join(os.tmpdir(), 'loopsync-steering-'),
 );
 

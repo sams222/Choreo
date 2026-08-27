@@ -1,7 +1,7 @@
 /**
  * CHOREO FROZEN PROTOCOL
  * Do not change field names without a team shout in the group chat.
- * JSON examples live in protocol/examples/. Person 1–4 all code against this file.
+ * JSON examples live in protocol/examples/. Runtime layers share this contract.
  */
 
 export type ProviderType = 'claude' | 'codex';
@@ -502,7 +502,7 @@ export interface OkResponse {
   ok: true;
 }
 
-export const REPLAY_LOG = 'data/loopsync-thread.jsonl';
+export const REPLAY_LOG = '.choreo/thread.jsonl';
 
 export type ErrorCode =
   | 'BAD_REQUEST'
@@ -526,7 +526,7 @@ export interface ErrorResponse {
 export const PORT = 4055;
 export const POLL_MS = 300;
 const configuredCliTimeout = Number.parseInt(
-  process.env.LOOPSYNC_CLI_TIMEOUT_MS ?? '',
+  process.env.CHOREO_CLI_TIMEOUT_MS ?? process.env.LOOPSYNC_CLI_TIMEOUT_MS ?? '',
   10,
 );
 export const CLI_TIMEOUT_MS =
@@ -534,14 +534,15 @@ export const CLI_TIMEOUT_MS =
     ? configuredCliTimeout
     : 30 * 60_000;
 export const DEFAULT_MAX_ITERATIONS = 5;
-export const WORKSPACE_ROOT = '/tmp/loopsync-workspaces';
+export const WORKSPACE_ROOT = '/tmp/choreo-workspaces';
 
 /**
  * Where isolated worktrees live. Overridable so two Choreo instances (or two
  * test files) never reset each other's trees out from under a running loop.
  */
 export function workspaceRoot(): string {
-  const override = process.env.LOOPSYNC_WORKSPACE_ROOT;
+  const override =
+    process.env.CHOREO_WORKSPACE_ROOT ?? process.env.LOOPSYNC_WORKSPACE_ROOT;
   return override && override.trim() !== '' ? override.trim() : WORKSPACE_ROOT;
 }
 export const ORACLE_PATHS = ['parse.test.js'] as const;
@@ -623,7 +624,7 @@ export const PROVIDER_COMMANDS = {
   },
 } as const;
 
-/** Set LOOPSYNC_PLAIN_CLI=1 to fall back to the old text output format. */
+/** Set CHOREO_PLAIN_CLI=1 to fall back to the old text output format. */
 export const PROVIDER_COMMANDS_PLAIN = {
   claude: {
     bin: 'claude',

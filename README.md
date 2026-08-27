@@ -1,130 +1,104 @@
 # Choreo
 
-[github.com/sams222/LoopSync](https://github.com/sams222/LoopSync) — Choreo, local orchestration for coding CLIs.
+[Choreo](https://github.com/sams222/Choreo) is a local orchestration layer for
+the Claude and Codex CLIs. It uses the accounts already authenticated on your
+machine and runs agents inside isolated copies of your project.
 
-State a **goal**. Choreo splits the work into **tests** and **implementation** (different processes, different context). When Plan and Write are different CLIs, those items run in parallel worktrees and merge. Tests freeze before a SHA is allowed. Coding agents never `git commit`.
+Give Choreo a goal and it separates test authoring from implementation. When
+different CLIs are assigned, both lanes can run concurrently in independent
+worktrees. Choreo merges them, runs the frozen test suite, optionally requests
+an independent review, and creates a local snapshot only after the gates pass.
+Nothing is written back to your project until you choose **Apply changes**.
 
-Point at an existing folder if you already have a tree. Leave the folder blank to start empty. There is no canned homework test in the default UI.
+## Requirements
 
-Install the `choreo` command, then run it inside a project: the dashboard opens with that folder already selected, and the models work against a copy of that tree.
+- Node.js 22 or newer
+- Git
+- An authenticated `claude` or `codex` CLI on `PATH`
 
-`POST /api/tasks` without a project still runs the Gate 2 parseIndex fixture.
-
-Gemini CLI is out of scope. There is no fake adapter on the demo.
-
-## Run locally
-
-You need Node 22+, `git`, and either `claude` or `codex` on PATH.
-
-### Install the `choreo` command
-
-From this repo:
+## Install
 
 ```bash
-git clone https://github.com/sams222/LoopSync.git
-cd LoopSync
+git clone https://github.com/sams222/Choreo.git
+cd Choreo
 npm install
-npm link          # or: npm install -g .
+npm link
 ```
 
-Then, in any project folder:
+Run Choreo from any project directory:
 
 ```bash
 cd ~/code/my-app
 choreo
 ```
 
-That starts the dashboard and points orchestration at the folder you launched from. Claude and Codex run against a copy of that tree. Leave Settings → Folder blank (or pass `--empty`) to start from an empty workspace instead.
-
-After every plan item succeeds and any parallel worktrees have merged, click
-**Apply changes** to write the completed files back to the launch directory.
-Apply is additive: it writes new and changed files without deleting existing
-files, and excludes `.git`, `.choreo`, dependencies, coverage, and build output.
+The dashboard opens with the launch directory selected. Agents work against an
+isolated copy, excluding Git metadata, Choreo state, dependencies, coverage,
+and build output.
 
 ```bash
-choreo                  # this directory
-choreo ../other-app     # another folder
-choreo --empty          # blank project
+choreo                  # use the current directory
+choreo ../other-app     # use another project
+choreo --empty          # start from an empty workspace
 choreo --no-open        # do not open the browser
-choreo -p 4099          # bind a different port
+choreo -p 4099          # use a different port
+choreo --host 127.0.0.1 # bind locally only
 ```
 
-`loopsync` is the same command.
-
-To uninstall the linked binary: `npm unlink -g choreo`.
-
-### Develop against this repo
+To remove a linked installation:
 
 ```bash
+npm unlink -g choreo
+```
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm test
 npm start
 ```
 
-`npm start` still serves the in-repo demo (folder left blank). The server binds `0.0.0.0:4055` and serves the dashboard from `web/`.
+`npm start` serves the dashboard at `http://127.0.0.1:4055`. The HTTP API also
+supports project creation, steering, cancellation, Apply, server-sent events,
+and replay. Request examples live in [`protocol/examples`](protocol/examples).
 
-```bash
-curl -s http://127.0.0.1:4055/api/state
+## Safety model
 
-# empty project — orchestrator writes tests + code
-curl -s -X POST http://127.0.0.1:4055/api/reset
-curl -s -D- -X POST http://127.0.0.1:4055/api/projects \
-  -H 'content-type: application/json' \
-  --data-binary @protocol/examples/http-post-projects.request.json
+- Claude and Codex run in copied workspaces, never directly in the source tree.
+- Test files freeze before implementation can receive a final SHA.
+- Coding agents do not own Git commits; the Node orchestrator does.
+- Apply is explicit and additive: it writes new and changed files but does not
+  delete existing source files.
+- `.git`, `.choreo`, `node_modules`, `dist`, and `coverage` are excluded from
+  Apply.
 
-# follow-up without Reset
-curl -s -D- -X POST http://127.0.0.1:4055/api/projects/<id>/messages \
-  -H 'content-type: application/json' \
-  --data-binary @protocol/examples/http-post-project-message.request.json
+Choreo stores its local ledger and replay thread under `.choreo/` in the launch
+directory. Replay a recorded project without invoking either CLI:
 
-# Gate 2 homework (copies fixture/, locks parse.test.js)
-curl -s -X POST http://127.0.0.1:4055/api/reset
-curl -s -D- -X POST http://127.0.0.1:4055/api/tasks \
-  -H 'content-type: application/json' \
-  --data-binary @protocol/examples/http-post-tasks.request.json
-
-# live push instead of polling
-curl -sN http://127.0.0.1:4055/api/events
+```text
+http://127.0.0.1:4055/?replay=<projectId>
 ```
 
-Sending a message while a run is in flight is accepted (`202`), shown in the
-thread as queued, and folded into the prompt at the next loop boundary. Cancel
-it before it lands with
-`POST /api/projects/<id>/steering/<messageId>/cancel`.
-
-### Replay a recorded run
-
-Every thread item is appended to `data/loopsync-thread.jsonl`. Open
-`http://127.0.0.1:4055/?replay=<projectId>` to re-render a past run at 10×
-with no CLIs involved — useful when the live tools or the wifi are unreliable.
-`GET /api/replay` lists the recorded ids.
-
-### Environment
+## Configuration
 
 | Variable | Effect |
 | --- | --- |
-| `LOOPSYNC_PLAIN_CLI=1` | Fall back to the old `--output-format text` argv if a CLI's JSON stream misbehaves |
-| `LOOPSYNC_WORKSPACE_ROOT` | Move the worktree root off `/tmp/loopsync-workspaces` |
-| `LOOPSYNC_CLI_TIMEOUT_MS` | Override the 30-minute per-process runtime limit (minimum 60,000 ms) |
+| `CHOREO_PLAIN_CLI=1` | Use plain-text CLI output instead of JSON event streams |
+| `CHOREO_WORKSPACE_ROOT` | Override the default `/tmp/choreo-workspaces` root |
+| `CHOREO_CLI_TIMEOUT_MS` | Override the 30-minute per-process limit; minimum 60 seconds |
 
-## Layout
+The former `LOOPSYNC_*` environment variables remain accepted as compatibility
+fallbacks but are no longer documented or preferred.
 
-- **[protocol/index.ts](protocol/index.ts)** — frozen types, PORT `4055`, CLI argv (additive fields only)
-- **[server/src/](server/src/)** — Express orchestrator, git runtime, Claude/Codex adapters, `runLoop`
-- **[web/](web/)** — live session over SSE (`/api/events`, 300ms polling fallback): one composer, server-ordered thread, race view, rendered diffs
-- **[examples/sqrt/](examples/sqrt/)** — optional sample tree you can paste as a folder, not the default job
-- **[fixture/](fixture/)** — Gate 2 homework (`4 !== 5`)
-- **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration
-- **[docs/KERNEL_RISKS.md](docs/KERNEL_RISKS.md)** — spawn, review, oracle, cancel, slots, retry gaps
+## Repository layout
 
-## CLI flags
-
-Both CLIs are driven in JSONL event mode so the dashboard can show real tool
-calls (`editing sqrt.js`, `ran node --test`) instead of narrating.
-
-```bash
-claude -p "<task>" --output-format stream-json --verbose --dangerously-skip-permissions
-codex exec --json --sandbox workspace-write --skip-git-repo-check "<prompt>"
-node --test
-```
-
-The parser is tolerant: any line it cannot read becomes a plain text event, and
-`LOOPSYNC_PLAIN_CLI=1` restores the previous text-mode argv wholesale.
+- [`bin/choreo.js`](bin/choreo.js) — installable command entry point
+- [`server/src`](server/src) — HTTP server, orchestration loop, CLI adapters,
+  Git isolation, state, and tests
+- [`protocol/index.ts`](protocol/index.ts) — shared API and runtime contracts
+- [`web`](web) — dashboard and provider assets
+- [`examples/sqrt`](examples/sqrt) — small example project
+- [`fixture`](fixture) — compatibility fixture for the low-level task API
+- [`docs/PLATFORM.md`](docs/PLATFORM.md) — architecture and scaling direction
