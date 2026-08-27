@@ -1,6 +1,6 @@
 # LoopSync — general build plan
 
-One person **builds** (Cursor + agents + git push). Everyone else **debugs** live runs or **plans the presentation**. The four playbooks in [`impl/`](impl/) are **agent tracks**, not four human coding streams.
+One person **builds** (Cursor + agents + git push). Everyone else **debugs** live runs or **plans the presentation**. The four files `docs/person-*.md` are **agent tracks** (contract + steps in one place), not four human coding streams.
 
 Frozen contracts stay in [`../protocol/index.ts`](../protocol/index.ts). Do not rename JSON keys mid-day.
 
@@ -40,7 +40,7 @@ flowchart LR
 
 ### Phase 0 — Scaffold (Builder + Agent A only)
 
-**Agents:** one, playbook [`impl/person-1-orchestrator.md`](impl/person-1-orchestrator.md) **steps 1–4 only** (Express, store, HTTP, **no** `runLoop` yet).
+**Agents:** one, playbook [`person-1-orchestrator.md`](person-1-orchestrator.md) **steps 1–4 only** (Express, store, HTTP, **no** `runLoop` yet).
 
 **Builder:** create `package.json` / `tsconfig` if the agent does not; `git push`.
 
@@ -56,8 +56,8 @@ flowchart LR
 
 **Agents in parallel:**
 
-- **Agent B** — [`impl/person-2-git-runtime.md`](impl/person-2-git-runtime.md) → `server/src/git.ts`
-- **Agent D (fixture only)** — [`impl/person-4-dashboard.md`](impl/person-4-dashboard.md) **step 1** → `git init` failing `fixture/` if needed
+- **Agent B** — [`person-2-git-runtime.md`](person-2-git-runtime.md) → `server/src/git.ts`
+- **Agent D (fixture only)** — [`person-4-dashboard.md`](person-4-dashboard.md) **step 1** → `git init` failing `fixture/` if needed
 
 **Builder:** merge both; do not start the loop.
 
@@ -73,8 +73,8 @@ flowchart LR
 
 Do **not** run Agent C and the loop agent before Gate 1.
 
-**First:** **Agent C** — [`impl/person-3-cli-adapters.md`](impl/person-3-cli-adapters.md) → `server/src/adapters.ts`  
-**Then:** **Agent A (loop)** — [`impl/person-1-orchestrator.md`](impl/person-1-orchestrator.md) **steps 5–7** — wire `runLoop` to real git + adapters.
+**First:** **Agent C** — [`person-3-cli-adapters.md`](person-3-cli-adapters.md) → `server/src/adapters.ts`  
+**Then:** **Agent A (loop)** — [`person-1-orchestrator.md`](person-1-orchestrator.md) **steps 5–7** — wire `runLoop` to real git + adapters.
 
 Codex and Claude may run **sequentially** on the demo laptop (one job). Do not demo Gemini.
 
@@ -90,7 +90,7 @@ Codex and Claude may run **sequentially** on the demo laptop (one job). Do not d
 
 ### Phase 3 — Dashboard (Agent D UI)
 
-**Agents:** **Agent D (UI)** — [`impl/person-4-dashboard.md`](impl/person-4-dashboard.md) steps 2–6 → `web/`. Builder serves it from Express `:4055`.
+**Agents:** **Agent D (UI)** — [`person-4-dashboard.md`](person-4-dashboard.md) steps 2–6 → `web/`. Builder serves it from Express `:4055`.
 
 **Debuggers:** full click path on desktop and a phone-width window. Log fetch errors.
 
@@ -190,7 +190,7 @@ flowchart LR
 
 ## How the Builder launches agents
 
-1. One playbook per agent: attach `docs/impl/person-N-*.md` + `protocol/index.ts` + `protocol/examples/`.
+1. One playbook per agent: attach `docs/person-*.md` + `protocol/index.ts` + `protocol/examples/`.
 2. Prompt: “Follow the playbook in order. Stop at the listed verify command. Do not edit protocol. Do not add Gemini or a fake adapter.”
 3. Max **two** code agents at once (Phase 1 only). Phase 2 is one adapter agent, then one loop agent.
 4. After each agent: Builder runs that phase’s **debugger** commands, then `git push`.

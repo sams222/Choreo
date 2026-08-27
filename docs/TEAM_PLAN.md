@@ -29,14 +29,14 @@ Phased plan, gates, and parallel graphs: **[BUILD_PLAN.md](BUILD_PLAN.md)**.
 
 ## Who owns what (agent tracks)
 
-| Track | Agent playbook | Writes | Human at the merge |
+| Track | Playbook | Writes | Human at the merge |
 |---|---|---|---|
-| **A — Orchestrator** | [impl/person-1-orchestrator.md](impl/person-1-orchestrator.md) | HTTP + `runLoop` + state | Builder |
-| **B — Git & tests** | [impl/person-2-git-runtime.md](impl/person-2-git-runtime.md) | `server/src/git.ts` | Builder |
-| **C — CLI runners** | [impl/person-3-cli-adapters.md](impl/person-3-cli-adapters.md) | `server/src/adapters.ts` | Builder |
-| **D — Dashboard & fixture** | [impl/person-4-dashboard.md](impl/person-4-dashboard.md) | `web/`, fixture git | Builder |
+| **A — Orchestrator** | [person-1-orchestrator.md](person-1-orchestrator.md) | HTTP + `runLoop` + state | Builder |
+| **B — Git & tests** | [person-2-git-runtime.md](person-2-git-runtime.md) | `server/src/git.ts` | Builder |
+| **C — CLI runners** | [person-3-cli-adapters.md](person-3-cli-adapters.md) | `server/src/adapters.ts` | Builder |
+| **D — Dashboard & fixture** | [person-4-dashboard.md](person-4-dashboard.md) | `web/`, fixture git | Builder |
 
-Person-numbered briefs below are still the **JSON contracts**. Launch agents from `docs/impl/`, not from four laptops.
+Each file is **contract + steps**. Do not keep a second copy. Launch agents from these four files, not from four laptops.
 
 ## Frozen contract
 
@@ -53,20 +53,18 @@ Constants already in protocol: port **4055**, poll **300ms**, CLI timeout **120s
 
 ```
 protocol/          frozen types (already in this repo)
-server/
-  loop.ts          Person 1
-  http.ts          Person 1
-  git.ts           Person 2
-  adapters.ts      Person 3
-web/               Person 4
-fixture/           Person 4 (tiny Node homework, zero npm deps)
+server/src/loop.ts, http.ts, state.ts   Track A
+server/src/git.ts                       Track B
+server/src/adapters.ts                  Track C
+web/                                    Track D
+fixture/                                Track D (tiny Node homework, zero npm deps)
 ```
 
-One Node app. Person 1’s server serves Person 4’s page **or** Person 4 runs Vite on another port and proxies `/api` to Person 1. Agree at hour 0: **simplest is Express serving `web/dist` plus `/api`.** If Vite is faster for Person 4, proxy `/api` → `http://127.0.0.1:4055`.
+One Node app. Track A’s server serves Track D’s `web/` as static files on **:4055**.
 
 Use port **4055** for the server (not 3000/5173/8080).
 
-## The loop (Person 1 only — everyone else plugs into this)
+## The loop (Track A — everyone else plugs into this)
 
 ```
 createWorkspace
@@ -108,17 +106,15 @@ Presenters work from Phase 0. Debuggers own every gate.
 
 ## Group rules
 
-1. Person 1 owns integration. Merge into `server/` through Person 1’s loop, not by inventing a second orchestrator.
-2. Agents must **not** git-commit. Person 2 is the only committer. Prompt them: “Do not run git commit. Do not change the test file.”
-3. One job at a time is enough. Do not build parallel worktrees unless the loop already works.
+1. Track A owns integration. Merge into `server/` through `runLoop`, not a second orchestrator.
+2. Coding agents must **not** `git commit`. Track B is the only committer. Prompt: “Do not run git commit. Do not change the test file.”
+3. One job at a time. No worktrees unless the loop already works.
 4. No Gemini. No fake adapter on stage.
-5. If a CLI hangs: Person 3’s `AbortSignal` + timeout (120s). Person 4 has Cancel.
+5. If a CLI hangs: Track C `AbortSignal` + 120s. Track D has Cancel.
 
-Per-person briefs (contracts):
+Agent tracks:
 
-- [Person 1 — Orchestrator](person-1-orchestrator.md)
-- [Person 2 — Git & tests](person-2-git-runtime.md)
-- [Person 3 — CLI runners](person-3-cli-adapters.md)
-- [Person 4 — Dashboard & fixture](person-4-dashboard.md)
-
-**Agent playbooks (step-by-step):** [impl/README.md](impl/README.md)
+- [Track A — Orchestrator](person-1-orchestrator.md)
+- [Track B — Git & tests](person-2-git-runtime.md)
+- [Track C — CLI runners](person-3-cli-adapters.md)
+- [Track D — Dashboard & fixture](person-4-dashboard.md)

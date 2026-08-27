@@ -8,13 +8,12 @@ Gemini CLI is not in scope (Google shut off individual Code Assist for that clie
 
 ## Team docs (read these before coding tomorrow)
 
-- **[docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)** — shared plan, loop, demo script
-- **[docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)** — phases, gates, parallel-agent graph (one Builder + agents)
-- **[docs/person-1-orchestrator.md](docs/person-1-orchestrator.md)** — HTTP + retry loop
-- **[docs/person-2-git-runtime.md](docs/person-2-git-runtime.md)** — copy, tests, commit, reset
-- **[docs/person-3-cli-adapters.md](docs/person-3-cli-adapters.md)** — spawn Claude / Codex
-- **[docs/person-4-dashboard.md](docs/person-4-dashboard.md)** — UI + fixture homework
-- **[docs/impl/](docs/impl/)** — numbered agent playbooks (files, verify commands, stop rules)
+- **[docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)** — overview, demo script
+- **[docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)** — phases, gates, parallel-agent graph
+- **[docs/person-1-orchestrator.md](docs/person-1-orchestrator.md)** — Track A (HTTP + loop)
+- **[docs/person-2-git-runtime.md](docs/person-2-git-runtime.md)** — Track B (git + tests)
+- **[docs/person-3-cli-adapters.md](docs/person-3-cli-adapters.md)** — Track C (Claude / Codex)
+- **[docs/person-4-dashboard.md](docs/person-4-dashboard.md)** — Track D (UI + fixture)
 
 **Frozen types:** [protocol/index.ts](protocol/index.ts)  
 **JSON payloads:** [protocol/examples/](protocol/examples/)  
@@ -36,4 +35,4 @@ git clone https://github.com/sams222/LoopSync.git
 cd LoopSync
 ```
 
-The `server/` and `web/` apps are not in this commit yet. Start from [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md) and the playbooks in [docs/impl/](docs/impl/).
+The `server/` and `web/` apps are not in this commit yet. Start from [docs/BUILD_PLAN.md](docs/BUILD_PLAN.md).

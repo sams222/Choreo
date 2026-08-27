@@ -1,12 +1,18 @@
-# Person 2 — Git & tests
+# Track B — Git & tests
 
-You own the homework copy, `node --test`, and the commit SHA. JSON you return is under [`../protocol/examples/`](../protocol/examples/).
+**One file for this track.** Builder feeds this to Agent B. JSON: `protocol/examples/git-*.json`.
 
-Fixture path in: **`fixture/`** (Person 4). Workspaces out: **`/tmp/loopsync-workspaces/<taskId>`**. No git worktrees.
+**Writes:** `server/src/git.ts` only  
+**Export:** `export function createGitRuntime(fixtureDir: string): GitRuntime`  
+**Does not:** spawn CLIs, HTTP, `web/`, change `fixture/parse.test.js`, worktrees, `npm install`, edit `protocol/index.ts`
 
-Export one object that matches `GitRuntime`.
+`fixtureDir` = absolute path to repo `fixture/`. Workspaces: `/tmp/loopsync-workspaces/<taskId>`.
 
-## `createWorkspace(taskId)` → `git-create-workspace.result.json`
+---
+
+## Contract — return JSON
+
+`createWorkspace(taskId)` → `git-create-workspace.result.json`:
 
 ```json
 {
@@ -15,97 +21,84 @@ Export one object that matches `GitRuntime`.
 }
 ```
 
-Implementation details:
+`runTests(dir)` fail / pass → `git-run-tests-fail.result.json` / `git-run-tests-pass.result.json`:
 
-- `fs.mkdir` `WORKSPACE_ROOT` (`/tmp/loopsync-workspaces`)
-- Copy Person 4’s `fixture/` recursively into `dir` (`fs.cpSync(src, dir, { recursive: true })`). Skip copying `fixture/.git` if clone is easier: `git clone --local <abs-fixture> <dir>` is also fine.
-- `dir` must be a git repo when you return. If you copied without `.git`, `git init` then you lose history — prefer clone or copy including `.git`.
-- `git -C dir checkout -b loopsync/<taskId>`
-- Set identity so commit cannot open an editor:
+```json
+{ "passed": false, "exitCode": 1, "output": "...4 !== 5..." }
+```
+
+`passed === (exitCode === 0)`. Full TAP in `output` (Track A injects this on attempt 2).
+
+`getDiff(dir)` → string (may be `""`).
+
+`commitIfDirty(dir, message)` → `git-commit.result.json` or `null`:
+
+```json
+{ "sha": "2e38bf1086d1d962ddbb5fd06b3970769d32c637", "diff": "diff --git a/parse.js ..." }
+```
+
+`resetAll()` → void. Delete `/tmp/loopsync-workspaces` only, never `fixture/`.
+
+Spawn **`shell: false`** always.
+
+---
+
+## Steps (Phase 1)
+
+### Step 0 — Confirm fixture still fails
 
 ```bash
-git -C "$dir" config user.email loopsync@local
-git -C "$dir" config user.name LoopSync
-git -C "$dir" config commit.gpgsign false
+cd fixture && node --test; echo exit=$?
 ```
 
-Must contain `parse.js` and `parse.test.js`.
+Must be `4 !== 5`, exit 1. If it passes, stop. Do not “fix” homework.
 
-## `runTests(dir)` 
-
-Fail shape (stock fixture, already observed): [`git-run-tests-fail.result.json`](../protocol/examples/git-run-tests-fail.result.json)
-
-```json
-{
-  "passed": false,
-  "exitCode": 1,
-  "output": "...4 !== 5..."
-}
-```
-
-Pass shape: [`git-run-tests-pass.result.json`](../protocol/examples/git-run-tests-pass.result.json)
-
-```json
-{
-  "passed": true,
-  "exitCode": 0,
-  "output": "...# pass 1..."
-}
-```
-
-Spawn **no shell**:
+### Step 1 — Skeleton
 
 ```ts
-spawn('node', ['--test'], { cwd: dir, shell: false })
-```
-
-`passed === (exitCode === 0)`. `output` = stdout + stderr, full text. Person 1 puts this string into attempt 2. Do not truncate the assertion; keep `4 !== 5`.
-
-## `getDiff(dir)` → string
-
-```ts
-spawn('git', ['diff', 'HEAD'], { cwd: dir, shell: false })
-```
-
-If staged-only changes exist, include `git diff --cached`. Empty string if clean. The succeeded example diff is:
-
-```diff
-diff --git a/parse.js b/parse.js
---- a/parse.js
-+++ b/parse.js
-@@ -1 +1 @@
--export function parseIndex(text) { return text.length - 1; }
-+export function parseIndex(text) { return text.length; }
-```
-
-## `commitIfDirty(dir, message)` → `git-commit.result.json` or `null`
-
-```json
-{
-  "sha": "2e38bf1086d1d962ddbb5fd06b3970769d32c637",
-  "diff": "diff --git a/parse.js b/parse.js\n..."
+export function createGitRuntime(fixtureDir: string): GitRuntime {
+  return { createWorkspace, runTests, getDiff, commitIfDirty, resetAll };
 }
 ```
 
-Steps: `git add -A` → if `git status --porcelain` empty, return `null` → `git commit -m message --no-verify` → `git rev-parse HEAD` for `sha` → `getDiff` against the parent (`git show --pretty=format: HEAD` or `git diff HEAD~1`). Never `--amend`. Never commit on Person 4’s original `fixture/` — only `dir`.
+### Step 2 — `createWorkspace`
 
-## `resetAll()` → void (Person 1 does not need a JSON body)
+1. mkdir `WORKSPACE_ROOT`  
+2. `dir = join(root, taskId)`; rm if exists  
+3. `fs.cpSync(fixtureDir, dir, { recursive: true })`  
+4. `git init` if no `.git`  
+5. `git checkout -b loopsync/${taskId}`  
+6. `user.email=loopsync@local`, `user.name=LoopSync`, `commit.gpgsign false`  
+7. Require `parse.js` + `parse.test.js`
 
-Delete `/tmp/loopsync-workspaces` recursively (`fs.rmSync(root, { recursive: true, force: true })`). Do not touch `fixture/`.
+### Step 3 — `runTests`
 
-## Isolated done-when (no Claude/Codex)
+`spawn('node', ['--test'], { cwd: dir, shell: false })`. Do not parse TAP for pass/fail.
 
-```bash
-# createWorkspace → runTests.passed === false (4 !== 5)
-# rewrite parse.js to `return text.length`
-# runTests.passed === true
-# commitIfDirty → sha length >= 7
-# resetAll → dir gone
+**Verify:** stock copy fails with `4 !== 5`; after `return text.length`, passes.
+
+### Step 4 — `getDiff`
+
+`git diff HEAD` plus `git diff --cached` if needed.
+
+### Step 5 — `commitIfDirty`
+
+`git add -A` → porcelain empty → `null` → `commit -m --no-verify` → `rev-parse HEAD` (40 chars) → `git diff HEAD~1 HEAD`. Never `--amend`, never commit in original `fixture/`.
+
+### Step 6 — `resetAll`
+
+`fs.rmSync(WORKSPACE_ROOT, { recursive: true, force: true })`.
+
+**Verify:** workspace gone; `fixture/parse.js` still `length - 1`.
+
+### Step 7 — Hand to Track A
+
+```ts
+const git = createGitRuntime(path.resolve('fixture'));
 ```
 
-## Do not
+---
 
-- Spawn CLIs
-- Change the test file
-- `npm install`
-- Worktrees
+## Done
+
+All five methods work with **no** Claude/Codex. **Gate 1.**

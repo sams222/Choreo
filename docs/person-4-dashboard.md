@@ -1,40 +1,32 @@
-# Person 4 — Dashboard & fixture homework
+# Track D — Dashboard & fixture
 
-You own the buggy homework and the screen. You only speak HTTP JSON from [`../protocol/examples/`](../protocol/examples/).
+**One file for this track.** Builder feeds this to Agent D. Fixture work = Phase 1 (parallel with Track B). UI = Phase 3 (**after Gate 2**).
+
+**Writes:** `web/index.html`, `web/app.js`, `web/styles.css`; `git init` on existing `fixture/`  
+**Does not:** spawn CLIs, git from the browser, Gemini, extra JSON keys, Socket.IO, Vite unless it works in 15 minutes, edit `protocol/index.ts`
 
 Base URL: `http://127.0.0.1:4055`. Poll **300ms**.
 
-## Fixture files (commit the failing version only)
+---
 
-`fixture/package.json`
+## Contract — fixture (already in repo; keep it failing)
+
+```js
+// parse.js
+export function parseIndex(text) { return text.length - 1; }
+```
+
+```js
+// parse.test.js — node:test, assert.equal(parseIndex('abcde'), 5)
+```
 
 ```json
 { "type": "module" }
 ```
 
-`fixture/parse.js`
+`node --test` must print `4 !== 5` and exit 1.
 
-```js
-export function parseIndex(text) {
-  return text.length - 1;
-}
-```
-
-`fixture/parse.test.js`
-
-```js
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { parseIndex } from './parse.js';
-
-test('length', () => {
-  assert.equal(parseIndex('abcde'), 5);
-});
-```
-
-`git init` inside `fixture/`, one commit of **this failing tree**. Zero npm deps. `node --test` must print `4 !== 5` and exit 1.
-
-Default Launch JSON (wire these as form defaults): [`http-post-tasks.request.json`](../protocol/examples/http-post-tasks.request.json)
+Launch defaults (`http-post-tasks.request.json`):
 
 ```json
 {
@@ -45,49 +37,60 @@ Default Launch JSON (wire these as form defaults): [`http-post-tasks.request.jso
 }
 ```
 
-Provider `<select>` values: `codex` | `claude` only. No Gemini.
+Provider select: `codex` | `claude` only.
 
-## HTTP you call
-
-| Button | Request | Success body | Error body |
+| UI | Request | Success | Error |
 |---|---|---|---|
-| (interval) | `GET /api/state` | `{ "tasks": TaskState[], "slots": [...] }` | show “Cannot reach orchestrator on :4055” |
-| Launch | `POST /api/tasks` + request JSON above | `{ "taskId": "task_01hxyz" }` | 400 `http-error-bad-request.json` or 409 `http-post-tasks.error-slot-busy.json` |
-| Cancel | `POST /api/tasks/${taskId}/cancel` | `{ "ok": true }` | 404 TASK_NOT_FOUND |
-| Reset | `POST /api/reset` | `{ "ok": true }` | 500 RESET_FAILED |
+| poll | `GET /api/state` | `ServerSnapshot` | “Cannot reach orchestrator on :4055” |
+| Launch | `POST /api/tasks` | `{ "taskId" }` | 400 / 409 |
+| Cancel | `POST /api/tasks/:id/cancel` | `{ "ok": true }` | 404 |
+| Reset | `POST /api/reset` | `{ "ok": true }` | |
 
-Until Person 1 is up, render [`http-get-state-succeeded.json`](../protocol/examples/http-get-state-succeeded.json) or [`sample-snapshot.json`](../sample-snapshot.json) from disk. That is layout data, not a fake agent.
+Paint: queued / running / retrying (`lastError`) / succeeded (`commitSha` + `diff`) / failed (`lastError`, hide SHA). Empty: “No jobs yet. Launch a fix.”
 
-## How to paint `TaskState`
+---
 
-| `status` | Badge | Extra |
-|---|---|---|
-| `queued` | Queued | Attempt 0/N |
-| `running` | Running | `Attempt {currentIteration}/{maxIterations}` |
-| `retrying` | Retrying | show `lastError` (the `4 !== 5` TAP) |
-| `succeeded` | Succeeded | **must** show `commitSha` + `<pre>` `diff` |
-| `failed` | Failed | show `lastError`, hide SHA |
+## Steps
 
-`slots[].isBusy` can disable that provider in the dropdown.
+### Step 1 — Phase 1: fixture git (parallel with Track B)
 
-Log pane: join `task.logs` with newlines, auto-scroll. Newest at bottom.
+If `fixture/.git` missing:
 
-Empty `tasks[]`: “No jobs yet. Launch a fix.”
+```bash
+cd fixture
+git init
+git add parse.js parse.test.js package.json
+git -c user.email=loopsync@local -c user.name=LoopSync commit -m "failing parseIndex"
+```
 
-## Layout
+**Verify:** `cd fixture && node --test` fails `4 !== 5`. Do not commit a passing `parse.js`.
 
-Left: title, prompt textarea, provider, Launch, Reset, Cancel.  
-Right: badge, logs, lastError, diff, SHA.  
-Narrow viewport: stack.
+### Step 2 — Page shell (may mock until Gate 2)
 
-## Done when
+Two columns. Left: title, prompt, provider, Launch, Cancel, Reset. Right: `#status` `#attempt` `#logs` `#lastError` `#diff` `#sha`. Mock: `protocol/examples/http-get-state-succeeded.json` behind `USE_MOCK`.
 
-1. `cd fixture && node --test` fails with `4 !== 5`
-2. UI Launch sends **exactly** the request JSON keys (`title`, `prompt`, `provider`, `maxIterations`)
-3. Live: Reset → Launch → logs move → Succeeded+SHA or Failed+error
+### Step 3 — `render(snapshot)`
 
-## Do not
+Latest task `tasks.at(-1)`. Only `TaskState` keys. Disable busy providers.
 
-- Fetch git or spawn CLIs from the browser
-- Extra JSON fields
-- Gemini option
+**Verify:** mock retrying → `4 !== 5`, no SHA; failed → no SHA; empty → empty copy.
+
+### Step 4 — Live HTTP (after Gate 2 / Track A is up)
+
+`USE_MOCK = false`. Same-origin or `http://127.0.0.1:4055`. Launch body exact keys from the contract.
+
+**Verify:** Reset → Launch Codex → logs → Succeeded+SHA or Failed+TAP. Repeat Claude.
+
+### Step 5 — Layout
+
+Desktop left ~360px; `max-width: 700px` stack. Hit targets ≥ 44px. No component library required.
+
+### Step 6 — Demo pass
+
+Reset → Launch → Attempt 1 (fail or pass, both real) → maybe Retrying → Succeeded + SHA.
+
+---
+
+## Done
+
+Fixture still fails. Frozen JSON keys only. Poll 300ms. Empty / error / success / fail handled. No Gemini.

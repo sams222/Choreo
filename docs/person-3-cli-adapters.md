@@ -1,78 +1,83 @@
-# Person 3 — CLI runners (Claude + Codex)
+# Track C — CLI runners (Claude + Codex)
 
-You wrap two commands that **already worked** on the demo laptop. JSON you return: [`cli-run.result.json`](../protocol/examples/cli-run.result.json).
+**One file for this track.** Builder feeds this to Agent C. Return JSON: `protocol/examples/cli-run.result.json`.
 
-Gemini is dead (`IneligibleTierError` / Antigravity). Do not add it.
+**Writes:** `server/src/adapters.ts` only  
+**Export:** `export function createAdapters(): Record<ProviderType, CLIAdapter>`  
+**Does not:** Gemini, FakeAdapter, `codex exec resume`, `shell: true`, `node --test`, `git commit`, `--sandbox read-only`, edit `protocol/index.ts`
 
-## Frozen argv (from `PROVIDER_COMMANDS`)
+Use `PROVIDER_COMMANDS` and `CLI_TIMEOUT_MS` (120000) from `protocol/index.ts`.
 
-Claude (pong + file fix both succeeded with these flags):
+---
+
+## Contract — argv (proven on the demo laptop)
 
 ```
 claude -p "<prompt>" --output-format text --dangerously-skip-permissions
-```
-
-Codex (pong + file fix succeeded; **must** be `workspace-write`, not `read-only`):
-
-```
 codex exec --sandbox workspace-write --skip-git-repo-check "<prompt>"
 ```
 
-`cwd` = `workspaceDir`. `shell: false`. Prompt is **one argv element**, never interpolated into bash.
-
-## `run()` signature
+`cwd` = `workspaceDir`. Prompt is **one argv element**.
 
 ```ts
-run(workspaceDir: string, prompt: string, onLog: (text: string) => void, signal: AbortSignal)
-  => Promise<{ output: string; exitCode: number }>
+run(workspaceDir, prompt, onLog, signal): Promise<{ output: string; exitCode: number }>
 ```
-
-Return example:
 
 ```json
-{
-  "output": "Done — `parseIndex` now returns `text.length`.\n",
-  "exitCode": 0
-}
+{ "output": "Done — `parseIndex` now returns `text.length`.\n", "exitCode": 0 }
 ```
 
-`exitCode === 0` means the **CLI process** exited. It does **not** mean tests passed. Codex/Claude may run `node --test` themselves (they did in the smoke tests). Person 1 still runs Person 2’s tests after you return. Do not call `node --test` or `git commit` in the adapter.
-
-## Spawn details that bit us
+`exitCode === 0` means the **process** exited, not that tests passed. Track A still runs Track B tests. Codex/Claude may run tests themselves; you must not.
 
 | Fact | What you do |
 |---|---|
-| Codex `approval: on-request` still edited without a TTY prompt when we used `codex exec` + workspace-write | Keep `exec`. Do not use interactive `codex` TUI. |
-| Codex read-only sandbox cannot write `parse.js` | Never pass `--sandbox read-only` in the loop. |
-| Claude needed `--dangerously-skip-permissions` or it may pause | Always pass it. |
-| Streaming | Pipe stdout **and** stderr. Each `onLog` chunk can be a line. Strip ANSI (`\x1B[...m`) if the dashboard shows garbage. |
-| Timeout | 120s then `AbortSignal` / kill. |
-| Kill | `spawn` with `detached: true` or process group; on abort `process.kill(-pid)` so children die. |
-| `TERM=dumb` | Fine. Do not allocate a PTY. |
-| Attempt 2 | New process. Person 1 passes the full string in `loop-attempt2-prompt.txt`. You do not call `codex exec resume`. |
+| Codex `approval: on-request` still edited via `exec` + workspace-write | Keep `exec`. No TUI. |
+| `read-only` cannot write `parse.js` | Never `read-only` in the loop. |
+| Claude pauses without skip-permissions | Always pass the flag. |
+| Streaming | stdout + stderr → `onLog`, strip ANSI |
+| Hang | 120s then kill process group (`detached: true`, `kill(-pid)`) |
+| Attempt 2 | New process. Track A passes `loop-attempt2-prompt.txt`. No `resume`. |
 
-## What the CLIs did on a good run (so you can recognize success in logs)
+---
 
-Codex: `apply patch` on `parse.js`, `text.length - 1` → `text.length`, then it ran tests itself.
+## Steps (Phase 2, before Track A `runLoop`)
 
-Claude: printed `Done — parseIndex now returns text.length.` then Person 1’s `node --test` passed.
-
-If `onLog` never fires and you only return at the end, Person 4’s log pane stays blank until exit — still acceptable, but line-by-line is better.
-
-## Isolated done-when
-
-Person 2 workspace with the known bug:
+### Step 1 — Skeleton
 
 ```ts
-await adapters.codex.run(dir, 'In parse.js, make parseIndex return text.length so the test expects 5. Do not ask questions.', console.log, ac.signal)
-await adapters.claude.run(dir, '…same…', console.log, ac.signal)
+export function createAdapters(): Record<ProviderType, CLIAdapter> {
+  return { claude: makeAdapter('claude'), codex: makeAdapter('codex') };
+}
 ```
 
-Then Person 2 `runTests(dir).passed === true`.
+`makeAdapter` uses `PROVIDER_COMMANDS[provider].bin` and `.args(prompt)`.
 
-## Do not
+### Step 2 — Spawn
 
-- Gemini / FakeAdapter
-- `shell: true`
-- Session resume APIs
-- Changing protocol field names
+Throw if `parse.js` missing in `workspaceDir`. Pipe both stdio. Concatenate `output`. Abort/timeout → SIGTERM then SIGKILL.
+
+### Step 3 — Strip ANSI (`\x1B\[[0-9;]*[A-Za-z]`).
+
+### Step 4–5 — Codex / Claude flags as in the contract. Codex may `node --test`; you still must not.
+
+### Step 6 — Isolated check (demo laptop + Track B workspace)
+
+```ts
+await adapters.codex.run(dir, 'In parse.js, make parseIndex return text.length so the test expects 5. Do not ask questions. Do not git commit.', onLog, signal)
+// git.runTests(dir).passed === true
+```
+
+Repeat Claude on a fresh copy. If CLIs missing in CI, still ship the wrapper.
+
+### Step 7 — Hand to Track A
+
+```ts
+const adapters = createAdapters();
+adapters[task.provider].run(dir, prompt, onLog, signal)
+```
+
+---
+
+## Done
+
+Shared spawn helper, frozen flags, 120s kill, no Gemini. Then Track A may wire `runLoop`.
