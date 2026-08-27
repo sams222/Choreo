@@ -9,6 +9,7 @@ Gemini CLI is not in scope (Google shut off individual Code Assist for that clie
 ## Team docs (read these before coding tomorrow)
 
 - **[docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)** — shared plan, loop, demo script
+- **[docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)** — phases, gates, parallel-agent graph (one Builder + agents)
 - **[docs/person-1-orchestrator.md](docs/person-1-orchestrator.md)** — HTTP + retry loop
 - **[docs/person-2-git-runtime.md](docs/person-2-git-runtime.md)** — copy, tests, commit, reset
 - **[docs/person-3-cli-adapters.md](docs/person-3-cli-adapters.md)** — spawn Claude / Codex

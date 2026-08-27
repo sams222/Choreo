@@ -1,14 +1,14 @@
 # Agent playbooks
 
-Feed **one** of these files to an agent, plus `protocol/index.ts` and `protocol/examples/`.
+The **Builder** (one human) feeds **one** of these files to an agent, plus `protocol/index.ts` and `protocol/examples/`. Other humans debug or plan the talk — see [BUILD_PLAN.md](../BUILD_PLAN.md).
 
-Do not edit `protocol/index.ts` unless the whole team agrees.
+Do not edit `protocol/index.ts` unless the Builder agrees.
 
-| Agent | Playbook | Writes |
-|---|---|---|
-| Person 1 | [person-1-orchestrator.md](person-1-orchestrator.md) | `package.json`, `tsconfig.json`, `server/src/{index,http,loop,state}.ts` |
-| Person 2 | [person-2-git-runtime.md](person-2-git-runtime.md) | `server/src/git.ts` only |
-| Person 3 | [person-3-cli-adapters.md](person-3-cli-adapters.md) | `server/src/adapters.ts` only |
-| Person 4 | [person-4-dashboard.md](person-4-dashboard.md) | `web/*`, git-init `fixture/` |
+| Track | Playbook | Writes | When |
+|---|---|---|---|
+| A | [person-1-orchestrator.md](person-1-orchestrator.md) | `package.json`, `tsconfig.json`, `server/src/{index,http,loop,state}.ts` | Phase 0 steps 1–4; Phase 2 steps 5–7 |
+| B | [person-2-git-runtime.md](person-2-git-runtime.md) | `server/src/git.ts` only | Phase 1, parallel with fixture |
+| C | [person-3-cli-adapters.md](person-3-cli-adapters.md) | `server/src/adapters.ts` only | Phase 2, before `runLoop` |
+| D | [person-4-dashboard.md](person-4-dashboard.md) | `web/*`, git-init `fixture/` | Fixture in Phase 1; UI only after Gate 2 |
 
-Person 1 must exist first as a compile skeleton, or Person 2/3 write files that Person 1 imports. Preferred: Person 1 step 1–3 (scaffold + stubs), then 2 and 3 in parallel, then Person 1 loop + HTTP, then Person 4 against live `/api`.
+Max two code agents at once (Phase 1). Never four humans each coding a playbook.

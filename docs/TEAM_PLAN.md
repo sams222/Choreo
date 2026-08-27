@@ -21,16 +21,22 @@ node --test
 
 Both have already edited `/tmp/loopsync-smoke/parse.js` and made the test pass.
 
-## Who owns what
+## How we work now
 
-| Person | Owns | Does not own |
-|---|---|---|
-| **1 — Orchestrator** | The retry loop, in-memory state, HTTP API | Git internals, CLI flags, React |
-| **2 — Git & tests** | Copy/branch homework, `node --test`, diff, commit, reset | Calling Claude/Codex, UI |
-| **3 — CLI runners** | Spawn Claude/Codex in a folder, stream logs, timeout, kill | Tests, commit, UI |
-| **4 — Dashboard & fixture** | One web page, fixture homework that starts failing | The loop, git, CLI flags |
+**One Builder** drives Cursor agents and pushes `main`. Everyone else **debugs** (curl, CLIs, UI) or **plans the presentation**. The four “people” in the contracts are **agent tracks**, not four coders.
 
-**Person 1 is the only one who calls Person 2 and Person 3.** Person 4 only talks to Person 1 over HTTP.
+Phased plan, gates, and parallel graphs: **[BUILD_PLAN.md](BUILD_PLAN.md)**.
+
+## Who owns what (agent tracks)
+
+| Track | Agent playbook | Writes | Human at the merge |
+|---|---|---|---|
+| **A — Orchestrator** | [impl/person-1-orchestrator.md](impl/person-1-orchestrator.md) | HTTP + `runLoop` + state | Builder |
+| **B — Git & tests** | [impl/person-2-git-runtime.md](impl/person-2-git-runtime.md) | `server/src/git.ts` | Builder |
+| **C — CLI runners** | [impl/person-3-cli-adapters.md](impl/person-3-cli-adapters.md) | `server/src/adapters.ts` | Builder |
+| **D — Dashboard & fixture** | [impl/person-4-dashboard.md](impl/person-4-dashboard.md) | `web/`, fixture git | Builder |
+
+Person-numbered briefs below are still the **JSON contracts**. Launch agents from `docs/impl/`, not from four laptops.
 
 ## Frozen contract
 
@@ -80,13 +86,17 @@ status = failed
 
 There is **no** special CLI “resume.” Attempt 2 is a **new process** whose prompt is: original task + test output.
 
-## Day shape (not four independent products)
+## Day shape
 
-- **Hour 0:** Scaffold folders. Nobody edits `protocol/index.ts` without the group. Person 4 commits the fixture. Person 1 writes `loop.ts` calling **empty** GitRuntime + CLIAdapter stubs that match the types.
-- **Hours 1–3:** Parallel fill-in. Person 1’s loop must run against Person 2 + 3 as soon as those functions exist.
-- **Hour 3 checkpoint:** From a terminal (no UI yet): launch Claude or Codex through `loop.ts`, see fail or pass, see a SHA if pass. If this is not true, **stop adding UI features.**
-- **Hours 3–5:** Person 4 wires Launch / logs / badge / diff / SHA / Reset to `/api`.
-- **Hour 5–6:** Timeouts, Cancel, rehearsal of the demo script three times.
+Follow **[BUILD_PLAN.md](BUILD_PLAN.md)** phases 0–4. Short version:
+
+- **Phase 0:** Agent A HTTP skeleton. Gate = empty `GET /api/state`.
+- **Phase 1:** Agent B git + Agent D fixture **in parallel**. Gate = `node --test` fails on a copy; commit SHA without a coding CLI.
+- **Phase 2:** Agent C adapters, then Agent A `runLoop`. Gate = curl launch → real Codex/Claude → SHA or TAP. **No UI until this passes.**
+- **Phase 3:** Agent D dashboard. Gate = Reset → Launch → badge + SHA.
+- **Phase 4:** humans harden + three rehearsals. Presenters own the talk; Builder only crash-fixes.
+
+Presenters work from Phase 0. Debuggers own every gate.
 
 ## Demo script (what judges see)
 
