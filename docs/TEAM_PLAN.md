@@ -45,7 +45,7 @@ Each file is **contract + steps**. Do not keep a second copy. Launch agents from
 
 Do not rename JSON keys. If you need a field, shout in the group chat first.
 
-Person 4 may build the UI against `protocol/examples/http-get-state-succeeded.json`. That is a **picture of state**, not a fake agent.
+Track D may mock the UI against `protocol/examples/http-get-state-succeeded.json`. That is a **picture of state**, not a fake agent.
 
 Constants already in protocol: port **4055**, poll **300ms**, CLI timeout **120s**, workspaces `/tmp/loopsync-workspaces`, default `maxIterations` **2**.
 
