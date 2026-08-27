@@ -42,11 +42,6 @@ const WEB_DIR = path.resolve(
   '../../web',
 );
 
-const DEFAULT_REPO_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../..',
-);
-
 function isProvider(value: unknown): value is ProviderType {
   return value === 'claude' || value === 'codex';
 }
@@ -263,24 +258,34 @@ function detectOraclePaths(sourceDir: string): string[] {
 
 function resolveSourceDir(
   input: string,
-  repoRoot: string,
+  baseDir: string,
 ): string | { error: string } {
   const resolved = path.isAbsolute(input)
     ? path.resolve(input)
-    : path.resolve(repoRoot, input);
+    : path.resolve(baseDir, input);
   if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
     return { error: `sourceDir is not a directory: ${resolved}` };
   }
   return resolved;
 }
 
-export function dashboardDefaults(_repoRoot: string) {
+export function dashboardDefaults(
+  overrides?: Partial<{
+    sourceDir: string;
+    title: string;
+    goal: string;
+    testCommand: string[];
+    oraclePaths: string[];
+  }>,
+) {
   return {
-    sourceDir: '',
-    title: '',
-    goal: '',
-    testCommand: [...DEFAULT_TEST_COMMAND],
-    oraclePaths: [] as string[],
+    sourceDir: overrides?.sourceDir ?? '',
+    title: overrides?.title ?? '',
+    goal: overrides?.goal ?? '',
+    testCommand: overrides?.testCommand
+      ? [...overrides.testCommand]
+      : [...DEFAULT_TEST_COMMAND],
+    oraclePaths: overrides?.oraclePaths ? [...overrides.oraclePaths] : [],
   };
 }
 
@@ -289,13 +294,16 @@ export function createHttpApp(deps: {
   git: GitRuntime;
   adapters: Record<ProviderType, CLIAdapter>;
   ledger?: Ledger;
+  /** Installed package root (fixture, web). Kept for callers; web is served from this file. */
   repoRoot?: string;
+  /** Folder the CLI was launched in — relative sourceDir and replay logs resolve here. */
+  projectDir?: string;
 }): Express {
   const { store, git, adapters, ledger } = deps;
-  const repoRoot = deps.repoRoot ?? DEFAULT_REPO_ROOT;
+  const projectDir = deps.projectDir ?? deps.repoRoot ?? process.cwd();
   const controllers = new Map<string, AbortController>();
   const app = express();
-  const replayPath = path.resolve(repoRoot, REPLAY_LOG);
+  const replayPath = path.resolve(projectDir, REPLAY_LOG);
   const replayed = new Set<string>();
 
   /** §3 — the client renders this; it never rebuilds thread order itself. */
@@ -760,7 +768,7 @@ export function createHttpApp(deps: {
     }
     let sourceDir: string | undefined;
     if (parsed.sourceDir) {
-      const resolved = resolveSourceDir(parsed.sourceDir, repoRoot);
+      const resolved = resolveSourceDir(parsed.sourceDir, projectDir);
       if (typeof resolved !== 'string') {
         sendError(res, 400, 'BAD_REQUEST', resolved.error);
         return;

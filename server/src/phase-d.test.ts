@@ -249,7 +249,7 @@ async function json<T = Record<string, unknown>>(
 }
 
 test('Gate 2 POST /api/tasks still returns 201', async () => {
-  const store = createStore(dashboardDefaults(repoRoot));
+  const store = createStore(dashboardDefaults());
   const git = createGitRuntime(fixtureDir);
   const app = createHttpApp({
     store,
@@ -272,7 +272,7 @@ test('Gate 2 POST /api/tasks still returns 201', async () => {
 });
 
 test('empty project writes tests then code; follow-up does not reset', async () => {
-  const store = createStore(dashboardDefaults(repoRoot));
+  const store = createStore(dashboardDefaults());
   const git = createGitRuntime(fixtureDir);
   const app = createHttpApp({
     store,
@@ -356,7 +356,7 @@ test('empty project writes tests then code; follow-up does not reset', async () 
 });
 
 test('tampering with frozen tests is ORACLE_TAMPERED', async () => {
-  const store = createStore(dashboardDefaults(repoRoot));
+  const store = createStore(dashboardDefaults());
   const git = createGitRuntime(fixtureDir);
   const app = createHttpApp({
     store,

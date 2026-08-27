@@ -85,6 +85,7 @@ let pinnedToBottom = true;
 let serverSkew = 0;
 let stream = null;
 let replay = null;
+let seededLaunch = false;
 
 function serverNow() {
   return Date.now() + serverSkew;
@@ -754,6 +755,22 @@ function updateActions() {
   }
 }
 
+function applyLaunchDefaults(force = false) {
+  if (!force && seededLaunch) return;
+  if (!force && lastProject) {
+    seededLaunch = true;
+    return;
+  }
+  const defaults = snapshot?.defaults ?? {};
+  if (els.sourceDir && (force || !els.sourceDir.value)) {
+    els.sourceDir.value = defaults.sourceDir ?? '';
+  }
+  if (els.title && (force || !els.title.value)) {
+    els.title.value = defaults.title ?? '';
+  }
+  seededLaunch = true;
+}
+
 /** An open project owns the cast; the row mirrors it instead of the defaults. */
 function syncSettings(project) {
   const fields = [
@@ -811,6 +828,7 @@ function render(next) {
   if (els.reset) els.reset.hidden = !project;
   if (els.settings) els.settings.classList.toggle('locked', Boolean(project));
   syncSettings(project);
+  applyLaunchDefaults();
 
   const thread = next?.thread ?? [];
   const hasSession = Boolean(project || thread.length);
@@ -924,9 +942,9 @@ async function resetAll() {
   hideResetConfirm();
   setFormError('');
   renderedKeys = '';
-  for (const field of [els.sourceDir, els.title, els.prompt]) {
-    if (field) field.value = '';
-  }
+  seededLaunch = false;
+  applyLaunchDefaults(true);
+  if (els.prompt) els.prompt.value = '';
   try {
     const res = await fetch(`${API}/api/reset`, { method: 'POST' });
     if (!res.ok) setFormError(await readErrorMessage(res));

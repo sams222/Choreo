@@ -6,6 +6,8 @@ State a **goal**. Choreo splits the work into **tests** and **implementation** (
 
 Point at an existing folder if you already have a tree. Leave the folder blank to start empty. There is no canned homework test in the default UI.
 
+Install the `choreo` command, then run it inside a project: the dashboard opens with that folder already selected, and the models work against a copy of that tree.
+
 `POST /api/tasks` without a project still runs the Gate 2 parseIndex fixture.
 
 Gemini CLI is out of scope. There is no fake adapter on the demo.
@@ -14,14 +16,45 @@ Gemini CLI is out of scope. There is no fake adapter on the demo.
 
 You need Node 22+, `git`, and either `claude` or `codex` on PATH.
 
+### Install the `choreo` command
+
+From this repo:
+
 ```bash
 git clone https://github.com/sams222/LoopSync.git
 cd LoopSync
 npm install
+npm link          # or: npm install -g .
+```
+
+Then, in any project folder:
+
+```bash
+cd ~/code/my-app
+choreo
+```
+
+That starts the dashboard and points orchestration at the folder you launched from. Claude and Codex run against a copy of that tree. Leave Settings → Folder blank (or pass `--empty`) to start from an empty workspace instead.
+
+```bash
+choreo                  # this directory
+choreo ../other-app     # another folder
+choreo --empty          # blank project
+choreo --no-open        # do not open the browser
+choreo -p 4099          # bind a different port
+```
+
+`loopsync` is the same command.
+
+To uninstall the linked binary: `npm unlink -g choreo`.
+
+### Develop against this repo
+
+```bash
 npm start
 ```
 
-The server binds `0.0.0.0:4055` and serves the dashboard from `web/`.
+`npm start` still serves the in-repo demo (folder left blank). The server binds `0.0.0.0:4055` and serves the dashboard from `web/`.
 
 ```bash
 curl -s http://127.0.0.1:4055/api/state

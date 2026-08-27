@@ -110,7 +110,7 @@ function makeGatedWriter(seen: string[]) {
 test('a steer sent mid-run is queued, shown, then folded in at the boundary', async () => {
   const seen: string[] = [];
   const gate = makeGatedWriter(seen);
-  const store = createStore(dashboardDefaults(repoRoot));
+  const store = createStore(dashboardDefaults());
   const base = await listen(
     createHttpApp({
       store,
@@ -171,7 +171,7 @@ test('a steer sent mid-run is queued, shown, then folded in at the boundary', as
 
 test('a queued steer can be cancelled before it is applied', async () => {
   const gate = makeGatedWriter([]);
-  const store = createStore(dashboardDefaults(repoRoot));
+  const store = createStore(dashboardDefaults());
   const base = await listen(
     createHttpApp({
       store,
@@ -215,7 +215,7 @@ test('a queued steer can be cancelled before it is applied', async () => {
 });
 
 test('the SSE stream pushes a frame and stops repeating unchanged state', async () => {
-  const store = createStore(dashboardDefaults(repoRoot));
+  const store = createStore(dashboardDefaults());
   const base = await listen(
     createHttpApp({
       store,

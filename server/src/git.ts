@@ -12,6 +12,22 @@ import {
   type WorkspaceContext,
 } from '../../protocol/index.ts';
 
+const SKIP_COPY_NAMES = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'coverage',
+  '.choreo',
+]);
+
+export function shouldCopyPath(sourceRoot: string, src: string): boolean {
+  const rel = path.relative(sourceRoot, src);
+  if (!rel || rel === '.') {
+    return true;
+  }
+  return !rel.split(path.sep).some((part) => SKIP_COPY_NAMES.has(part));
+}
+
 export function createGitRuntime(fixtureDir: string): GitRuntime {
   function resolveCtx(ctx?: WorkspaceContext) {
     const empty = Boolean(ctx?.empty) || (Boolean(ctx?.persistDir) && !ctx?.sourceDir);
@@ -47,7 +63,10 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
         fs.rmSync(dir, { recursive: true, force: true });
       }
       if (sourceDir && fs.existsSync(sourceDir)) {
-        fs.cpSync(sourceDir, dir, { recursive: true });
+        fs.cpSync(sourceDir, dir, {
+          recursive: true,
+          filter: (src) => shouldCopyPath(sourceDir, src),
+        });
       } else {
         fs.mkdirSync(dir, { recursive: true });
       }

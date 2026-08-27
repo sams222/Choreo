@@ -26,6 +26,6 @@ export function createLedger(filePath: string) {
 
 export type Ledger = ReturnType<typeof createLedger>;
 
-export function defaultLedgerPath(): string {
-  return path.resolve('data/loopsync-ledger.jsonl');
+export function defaultLedgerPath(root = process.cwd()): string {
+  return path.resolve(root, 'data/loopsync-ledger.jsonl');
 }

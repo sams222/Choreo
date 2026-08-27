@@ -1,10 +1,32 @@
 {
   "name": "choreo",
-  "private": true,
+  "version": "0.1.0",
+  "description": "Local orchestration for coding CLIs",
   "type": "module",
+  "bin": {
+    "choreo": "bin/choreo.js",
+    "loopsync": "bin/choreo.js"
+  },
+  "files": [
+    "bin",
+    "server",
+    "protocol",
+    "web",
+    "fixture",
+    "examples",
+    "tsconfig.json"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sams222/LoopSync.git"
+  },
   "scripts": {
     "dev": "tsx watch server/src/index.ts",
     "start": "tsx server/src/index.ts",
+    "choreo": "tsx server/src/cli.ts",
     "test": "tsx --test server/src/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
