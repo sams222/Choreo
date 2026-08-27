@@ -46,10 +46,13 @@ Do **not** steal in the next phases: a proprietary cloud VM fleet, a browser ope
 A user opens LoopSync, points it at a folder (or an empty project), types a goal, picks who plans / writes / reviews, and optionally writes or generates **tests for that goal**. LoopSync:
 
 1. Produces a plan as a list of **work items** (not a paragraph).
-2. Lets the human edit or freeze the plan.
-3. Runs each item through the existing `runLoop` kernel (or a thin scheduler that only **enqueues** `runLoop`).
-4. Shows files and a pass/fail oracle for *that* item.
-5. Stops on caps, cancel, or a red oracle. Never lets a model `git commit`.
+2. Lets the human **keep talking** to the orchestrator: amend the goal, drop an item, “use binary search instead,” “stop on item 3.”
+3. Lets the human edit or freeze the plan.
+4. Runs each item through the existing `runLoop` kernel (or a thin scheduler that only **enqueues** `runLoop`).
+5. Shows files and a pass/fail oracle for *that* item.
+6. Stops on caps, cancel, or a red oracle. Never lets a model `git commit`.
+
+The thread is with the **orchestrator**, not a single writer chat that also reviews itself. Follow-ups change the **plan** (and re-run judged steps). They do not skip the oracle.
 
 One Node process on `:4055` remains the only process that spawns CLIs and git.
 
@@ -65,16 +68,17 @@ Project
 
 ```mermaid
 flowchart TB
-  User[User: goal + repo] --> UI[Dashboard]
-  UI --> HTTP[POST /api/projects then /api/plans]
-  HTTP --> Sched[Scheduler: enqueue only]
+  User[User: goal, then follow-ups] --> UI[Dashboard thread]
+  UI --> HTTP[POST /api/projects /plans /messages]
+  HTTP --> Orch[Orchestrator: mutate plan]
+  Orch --> Sched[Scheduler: enqueue only]
   Sched --> Loop[runLoop kernel]
-  Loop --> PlanCLI[Planner CLI]
   Loop --> Writer[Writer CLI]
   Loop --> Oracle[Locked tests]
   Loop --> Review[Reviewer CLI]
   Loop --> Git[commitIfDirty]
-  Loop --> Files[Code pane / artifacts]
+  Loop --> Files[Code pane]
+  Files --> User
 ```
 
 ---
@@ -88,6 +92,7 @@ flowchart TB
 5. **No Gemini, no FakeAdapter.** Claude and Codex stay the workers.
 6. **Caps before every `adapter.run`.** Ledger survives Reset of the live UI.
 7. Additive protocol fields only until a versioned v2; then a shout, not a silent rename.
+8. **Dialogue is with the orchestrator.** Follow-up messages may rewrite plan items and enqueue another `runLoop`. They must not open a long-lived writer TTY, merge writer+reviewer into one context, or commit without the oracle.
 
 ---
 
@@ -111,22 +116,28 @@ Each phase has a gate. Do not start the next until the gate is true. UI polish c
 
 **Gate D:** User launches “add `integer_sqrt` in `sqrt.py`” against a tiny Python tree whose tests assert `integer_sqrt(9) == 3`. SHA contains `sqrt.py`. `parse.js` is never touched. Editing the pytest file still yields `ORACLE_TAMPERED`.
 
-### Phase E — The plan is an object
+### Phase E — Plan as an object, plus a steering thread
 
-**Problem:** Planner output is prose in a timeline card. The writer still gets one blob.
+**Problem:** Planner output is prose in a timeline card. Launch is one prompt; there is no way to iterate on the output except Reset and start over.
 
 **Build:**
 
 - Planner must emit a machine-readable plan (JSON in `protocol/examples/plan.v1.json`): ordered `items[]` with `title`, `files[]`, `doneWhen`.
 - Human sees a checklist. Can delete, reorder, or freeze an item before Run.
-- Scheduler runs **one item at a time** through `runLoop` (demo laptop: sequential).
-- Item prompt = original goal + this item + list of already-shipped files.
+- **Composer stays open for the life of the project.** `POST /api/projects/:id/messages` `{ role: "user", text }`.
+- Orchestrator (LoopSync + optional planner CLI, **new process per message**, not `codex exec resume`) returns `{ reply, planPatch }`. Node applies the patch: add/cancel/reopen items, update prompts.
+- If the user is talking about an item that already ran, scheduler enqueues a **new** `runLoop` for that item (retry with the new instruction + last oracle/review text). Workspace is the project copy; writer still cannot commit.
+- Scheduler runs **one item at a time** through `runLoop` unless Phase G says two items are independent.
+- Item prompt = original goal + this item + **thread summary** + already-shipped files.
 
-**UI:** Manus-style task list in the activity column. Current item highlighted. Code pane follows the active item.
+**UI:** Left column becomes the **thread** (user + orchestrator), not a one-shot form. Center is the checklist. Right is files. Sending a message while an item runs either queues or Stop-then-apply (do not attach to the live writer stdin).
 
-**Gate E:** A two-item plan (write `sqrt.py`, then write `test_sqrt.py` **unlocked** as production — wait: tests that *are* the oracle stay locked; extra tests the writer owns are production). Simpler gate: two items, both production, one oracle file pre-existing. Both items succeed; the list shows item 1 done before item 2 starts.
+**Gate E:**
 
-Do **not** let an LLM rewrite the oracle in this phase.
+1. Two-item plan; item 1 done before item 2 starts.
+2. After item 1’s files are visible, user sends “switch the algorithm to binary search.” Orchestrator replies in the thread, the item re-runs, Code pane updates. No Reset. Oracle still has to pass.
+
+Do **not** let an LLM rewrite the oracle in this phase. Do **not** implement chat-as-writer (one model that plans, codes, and reviews in the same window).
 
 ### Phase F — Queue, ledger, resume
 
@@ -169,10 +180,11 @@ Do **not** let an LLM rewrite the oracle in this phase.
 ```ts
 Project {
   id, title, goal
-  sourceDir          // original; never commit here
+  sourceDir
   testCommand: string[]
   oraclePaths: string[]
   plannerProvider?, writerProvider, reviewerProvider?
+  messages: { id, role: user | orchestrator, text, ts }[]
 }
 
 Plan {
@@ -195,7 +207,7 @@ PlanItem {
 
 | Column | Now | Target |
 |---|---|---|
-| Left | New run | **Project**: folder, goal, agents, oracle chip |
+| Left | New run | **Thread**: goal, then follow-ups to the orchestrator |
 | Center | Activity cards | **Plan checklist** + per-item activity (no CLI chrome) |
 | Right | Code pane | **Artifacts**: files for the selected item; click through history |
 
@@ -213,7 +225,7 @@ If we only get one more slice after this doc, it is **Phase D Gate D**:
 4. UI: folder + goal; Code pane already shows new files.
 5. Ship a second demo tree `examples/sqrt/` with pytest (or `node --test` on a `sqrt.js`) so we do not pretend `parseIndex` is every job.
 
-That unblocks “orchestrate a project.” Phases E–F are how it becomes Manus-shaped without throwing away the kernel.
+That unblocks “orchestrate a project.” Phase E adds the checklist **and** the ongoing orchestrator dialogue. Phase F is resume. Phase G is parallel shards.
 
 ---
 
