@@ -1,11 +1,19 @@
 {
-  "reply": "Implement integerSqrt in sqrt.js. Leave sqrt.test.js locked.",
+  "reply": "Write tests first, then implement. Tests freeze before a SHA.",
   "items": [
     {
-      "title": "Implement integerSqrt",
+      "kind": "tests",
+      "title": "Write tests",
+      "files": ["sqrt.test.js"],
+      "doneWhen": "tests describe integerSqrt(9) === 3",
+      "prompt": "Write tests only for integerSqrt. Do not implement production code."
+    },
+    {
+      "kind": "code",
+      "title": "Implement",
       "files": ["sqrt.js"],
       "doneWhen": "integerSqrt(9) === 3",
-      "prompt": "Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js. Do not run git commit."
+      "prompt": "Implement integerSqrt so the tests pass. Do not change test files."
     }
   ]
 }

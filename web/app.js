@@ -43,7 +43,6 @@ const els = {
   cancel: document.getElementById('cancel'),
   reset: document.getElementById('reset'),
   followCancel: document.getElementById('followCancel'),
-  followReset: document.getElementById('followReset'),
   empty: document.getElementById('empty'),
   job: document.getElementById('job'),
   status: document.getElementById('status'),
@@ -125,7 +124,7 @@ function updateActions(task) {
   for (const button of [els.cancel, els.followCancel]) {
     if (button) button.disabled = !reachable || !inFlight;
   }
-  for (const button of [els.reset, els.followReset]) {
+  for (const button of [els.reset]) {
     if (button) button.disabled = !reachable;
   }
 }
@@ -163,8 +162,13 @@ function renderPlan(project) {
     meta.className = 'meta';
     const files = Array.isArray(item.files) && item.files.length
       ? item.files.join(', ')
-      : 'files TBD';
-    meta.textContent = `${item.status} · ${files}`;
+      : item.kind === 'tests'
+        ? 'tests'
+        : 'implementation';
+    const kind = item.kind === 'tests' ? 'tests' : item.kind === 'code' ? 'code' : '';
+    meta.textContent = kind
+      ? `${kind} · ${item.status} · ${files}`
+      : `${item.status} · ${files}`;
     li.append(mark, title, meta);
     els.plan.append(li);
   }
@@ -249,7 +253,7 @@ function renderFiles(task, snapshot) {
   for (const file of files) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.textContent = file.path;
+    button.textContent = file.locked ? `${file.path} (locked)` : file.path;
     button.className = file.path === selectedFile ? 'active' : '';
     button.addEventListener('click', () => {
       selectedFile = file.path;
@@ -269,9 +273,15 @@ function renderComposer(project) {
   els.appTitle.textContent = open ? project.title : 'New project';
   if (els.oracleChip) {
     els.oracleChip.hidden = !open;
-    els.oracleChip.textContent = open
-      ? `Locked · ${(project.oraclePaths ?? []).join(', ') || 'tests'}`
-      : '';
+    if (open) {
+      const locked = (project.oraclePaths ?? []).join(', ');
+      els.oracleChip.textContent = locked
+        ? `Locked · ${locked}`
+        : 'Tests not frozen yet';
+      els.oracleChip.classList.toggle('open', !locked);
+    } else {
+      els.oracleChip.textContent = '';
+    }
   }
   if (els.sourceReadout) {
     els.sourceReadout.hidden = !open;
@@ -384,6 +394,9 @@ async function cancelCurrent() {
 }
 
 async function resetAll() {
+  if (!window.confirm('Reset the live project? The ledger on disk is kept.')) {
+    return;
+  }
   setFormError('');
   selectedFile = null;
   defaultsApplied = false;
@@ -400,14 +413,21 @@ els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   setFormError('');
   selectedFile = null;
+  const goal = els.prompt.value.trim();
+  if (!goal) {
+    setFormError('Describe a goal first');
+    return;
+  }
   try {
     const res = await fetch(`${API}/api/projects`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        title: els.title.value,
-        goal: els.prompt.value,
-        sourceDir: els.sourceDir.value,
+        title: els.title.value.trim() || 'Untitled',
+        goal,
+        ...(els.sourceDir.value.trim()
+          ? { sourceDir: els.sourceDir.value.trim() }
+          : {}),
         writerProvider: els.provider.value,
         maxIterations: 2,
         testCommand: ['node', '--test'],
@@ -460,7 +480,6 @@ els.followForm.addEventListener('submit', async (event) => {
 els.cancel.addEventListener('click', cancelCurrent);
 els.followCancel.addEventListener('click', cancelCurrent);
 els.reset.addEventListener('click', resetAll);
-els.followReset.addEventListener('click', resetAll);
 
 els.provider.addEventListener('change', () => updateActions(lastTask));
 els.reviewerProvider?.addEventListener('change', () => updateActions(lastTask));

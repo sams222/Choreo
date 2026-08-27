@@ -6,15 +6,19 @@ import express from 'express';
 import type { Express, NextFunction, Request, Response } from 'express';
 import {
   DEFAULT_MAX_ITERATIONS,
-  DEFAULT_SQRT,
   DEFAULT_TEST_COMMAND,
+  defaultBuildPlan,
+  ensureTestsItem,
+  inferJobKind,
   parsePlanObject,
+  planObjectPrompt,
   steerPrompt,
   WORKSPACE_ROOT,
   type CLIAdapter,
   type CreateProjectBody,
   type ErrorCode,
   type GitRuntime,
+  type JobKind,
   type LaunchTaskBody,
   type PlanItem,
   type ProjectState,
@@ -148,24 +152,24 @@ function readCreateProjectBody(
     return { error: 'request body must be a JSON object' };
   }
   const record = body as Record<string, unknown>;
-  if (typeof record.title !== 'string' || record.title.trim() === '') {
-    return { error: 'title is required' };
-  }
   if (typeof record.goal !== 'string' || record.goal.trim() === '') {
     return { error: 'goal is required' };
-  }
-  if (typeof record.sourceDir !== 'string' || record.sourceDir.trim() === '') {
-    return { error: 'sourceDir is required' };
   }
   if (!isProvider(record.writerProvider)) {
     return { error: 'writerProvider must be claude or codex' };
   }
+  const title =
+    typeof record.title === 'string' && record.title.trim() !== ''
+      ? record.title.trim()
+      : 'Untitled';
   const project: CreateProjectBody = {
-    title: record.title.trim(),
+    title,
     goal: record.goal.trim(),
-    sourceDir: record.sourceDir.trim(),
     writerProvider: record.writerProvider,
   };
+  if (typeof record.sourceDir === 'string' && record.sourceDir.trim() !== '') {
+    project.sourceDir = record.sourceDir.trim();
+  }
   const planner = readOptionalProvider(record, 'plannerProvider');
   if (planner && typeof planner === 'object' && 'error' in planner) {
     return planner;
@@ -261,13 +265,13 @@ function resolveSourceDir(
   return resolved;
 }
 
-export function dashboardDefaults(repoRoot: string) {
+export function dashboardDefaults(_repoRoot: string) {
   return {
-    sourceDir: path.join(repoRoot, 'examples/sqrt'),
-    title: DEFAULT_SQRT.title,
-    goal: DEFAULT_SQRT.goal,
+    sourceDir: '',
+    title: '',
+    goal: '',
     testCommand: [...DEFAULT_TEST_COMMAND],
-    oraclePaths: [...(DEFAULT_SQRT.oraclePaths ?? ['sqrt.test.js'])],
+    oraclePaths: [] as string[],
   };
 }
 
@@ -319,31 +323,52 @@ export function createHttpApp(deps: {
   function launchBodyForItem(
     project: ProjectState,
     item: PlanItem,
-    includePlanner: boolean,
+    opts?: {
+      persistDir?: string;
+      skipTests?: boolean;
+      skipCommit?: boolean;
+    },
   ): LaunchTaskBody {
+    const kind = inferJobKind(item);
+    const testAuthor = project.plannerProvider ?? project.writerProvider;
+    const provider = kind === 'tests' ? testAuthor : project.writerProvider;
+    const empty = !project.sourceDir;
     return {
       title: item.title,
       prompt: item.prompt || project.goal,
-      provider: project.writerProvider,
+      provider,
       maxIterations: project.maxIterations,
-      reviewerProvider: project.reviewerProvider,
-      orchestratorProvider: includePlanner
-        ? project.plannerProvider
-        : undefined,
+      reviewerProvider: kind === 'code' ? project.reviewerProvider : undefined,
       projectId: project.id,
       sourceDir: project.sourceDir,
       oraclePaths: [...project.oraclePaths],
       testCommand: [...project.testCommand],
-      persistDir: project.workspaceDir,
+      persistDir: opts?.persistDir ?? project.workspaceDir,
+      jobKind: kind,
+      skipTests: opts?.skipTests,
+      skipCommit: opts?.skipCommit,
+      empty,
     };
   }
 
   function startProjectItem(
     project: ProjectState,
     item: PlanItem,
-    includePlanner: boolean,
+    opts?: {
+      persistDir?: string;
+      skipTests?: boolean;
+      skipCommit?: boolean;
+    },
   ): string | { error: string; code: ErrorCode; status: number } {
-    const involved = involvedFromProject(project, includePlanner);
+    const kind = inferJobKind(item);
+    const provider =
+      kind === 'tests'
+        ? (project.plannerProvider ?? project.writerProvider)
+        : project.writerProvider;
+    const involved = new Set<ProviderType>([provider]);
+    if (kind === 'code' && project.reviewerProvider) {
+      involved.add(project.reviewerProvider);
+    }
     const busy = slotsBusy(involved);
     if (busy) {
       return {
@@ -353,11 +378,98 @@ export function createHttpApp(deps: {
       };
     }
     occupy(involved);
-    const task = store.addTask(launchBodyForItem(project, item, includePlanner));
-    store.patchPlanItem(item.id, { status: 'running', taskId: task.id });
+    const live = store.getProject() ?? project;
+    const task = store.addTask(launchBodyForItem(live, item, opts));
+    store.patchPlanItem(item.id, { status: 'running', taskId: task.id, kind });
     store.updateProject({ activeTaskId: task.id });
     startLoop(task.id);
     return task.id;
+  }
+
+  function canRunParallel(project: ProjectState): boolean {
+    return Boolean(
+      project.plannerProvider &&
+        project.plannerProvider !== project.writerProvider,
+    );
+  }
+
+  async function mergeParallelShards(project: ProjectState): Promise<void> {
+    const shards = project.shards;
+    if (!shards) {
+      return;
+    }
+    occupy(new Set([project.writerProvider]));
+    try {
+      await git.mergeShards(project.workspaceDir, shards.testsDir, shards.codeDir);
+      const testFiles = await git.listTestFiles(project.workspaceDir);
+      store.updateProject({ oraclePaths: testFiles, shards: undefined });
+      const ctx = {
+        sourceDir: project.sourceDir,
+        oraclePaths: testFiles,
+        testCommand: project.testCommand,
+        persistDir: project.workspaceDir,
+        empty: !project.sourceDir,
+        mode: 'code' as JobKind,
+      };
+      const tests = await git.runTests(project.workspaceDir, ctx);
+      if (!tests.passed) {
+        const codeItem = project.plan.find((item) => inferJobKind(item) === 'code');
+        if (codeItem) {
+          store.patchPlanItem(codeItem.id, { status: 'pending' });
+        }
+        return;
+      }
+      await git.createWorkspace(`merge_${project.id}`, ctx);
+      const commit = await git.commitIfDirty(
+        project.workspaceDir,
+        `LoopSync: ${project.title}`,
+        ctx,
+      );
+      if (commit) {
+        const codeItem = (store.getProject() ?? project).plan.find(
+          (item) => inferJobKind(item) === 'code',
+        );
+        if (codeItem?.taskId) {
+          store.updateTask(codeItem.taskId, {
+            commitSha: commit.sha,
+            diff: commit.diff,
+            oraclePaths: testFiles,
+          });
+        }
+      }
+    } finally {
+      store.setBusy(project.writerProvider, false);
+    }
+  }
+
+  function startEligibleItems(): void {
+    const project = store.getProject();
+    if (!project) {
+      return;
+    }
+    if (project.plan.some((item) => item.status === 'running')) {
+      return;
+    }
+    const pending = project.plan.filter((item) => item.status === 'pending');
+    if (pending.length === 0) {
+      return;
+    }
+    const testsItem = pending.find((item) => inferJobKind(item) === 'tests');
+    const codeItem = pending.find((item) => inferJobKind(item) === 'code');
+    if (testsItem && codeItem && canRunParallel(project)) {
+      const testsDir = `${project.workspaceDir}-tests`;
+      const codeDir = `${project.workspaceDir}-code`;
+      store.updateProject({ shards: { testsDir, codeDir } });
+      startProjectItem(project, testsItem, { persistDir: testsDir });
+      startProjectItem(store.getProject() ?? project, codeItem, {
+        persistDir: codeDir,
+        skipTests: true,
+        skipCommit: true,
+      });
+      return;
+    }
+    const next = testsItem ?? pending[0];
+    startProjectItem(store.getProject() ?? project, next);
   }
 
   function queueNextPlanItem(): void {
@@ -365,20 +477,31 @@ export function createHttpApp(deps: {
     if (!project) {
       return;
     }
-    const next = project.plan.find((item) => item.status === 'pending');
-    if (!next) {
-      return;
-    }
     const last = [...store.getSnapshot().tasks]
       .reverse()
       .find((task) => task.projectId === project.id);
-    if (!last || last.status !== 'succeeded') {
+    if (last && last.status !== 'succeeded' && last.status !== 'failed') {
       return;
     }
-    const result = startProjectItem(project, next, false);
-    if (typeof result !== 'string') {
-      return;
+    const shards = project.shards;
+    if (shards) {
+      const testsDone = project.plan.some(
+        (item) => inferJobKind(item) === 'tests' && item.status === 'succeeded',
+      );
+      const codeDone = project.plan.some(
+        (item) => inferJobKind(item) === 'code' && item.status === 'succeeded',
+      );
+      if (testsDone && codeDone) {
+        void mergeParallelShards(store.getProject() ?? project).then(() => {
+          startEligibleItems();
+        });
+        return;
+      }
+      if (project.plan.some((item) => item.status === 'running')) {
+        return;
+      }
     }
+    startEligibleItems();
   }
 
   app.use(express.json());
@@ -398,7 +521,7 @@ export function createHttpApp(deps: {
     res.status(200).json(store.getSnapshot());
   });
 
-  app.post('/api/projects', (req, res) => {
+  app.post('/api/projects', async (req, res) => {
     const parsed = readCreateProjectBody(req);
     if ('error' in parsed) {
       sendError(res, 400, 'BAD_REQUEST', parsed.error);
@@ -413,39 +536,33 @@ export function createHttpApp(deps: {
       );
       return;
     }
-    const sourceDir = resolveSourceDir(parsed.sourceDir, repoRoot);
-    if (typeof sourceDir !== 'string') {
-      sendError(res, 400, 'BAD_REQUEST', sourceDir.error);
-      return;
+    let sourceDir: string | undefined;
+    if (parsed.sourceDir) {
+      const resolved = resolveSourceDir(parsed.sourceDir, repoRoot);
+      if (typeof resolved !== 'string') {
+        sendError(res, 400, 'BAD_REQUEST', resolved.error);
+        return;
+      }
+      sourceDir = resolved;
     }
+    const existingTests = sourceDir ? detectOraclePaths(sourceDir) : [];
     const oraclePaths =
       parsed.oraclePaths && parsed.oraclePaths.length > 0
         ? parsed.oraclePaths
-        : detectOraclePaths(sourceDir);
-    if (oraclePaths.length === 0) {
-      sendError(
-        res,
-        400,
-        'BAD_REQUEST',
-        'oraclePaths is required (no test files found in sourceDir)',
-      );
-      return;
-    }
+        : existingTests;
     const testCommand =
       parsed.testCommand && parsed.testCommand.length > 0
         ? parsed.testCommand
         : [...DEFAULT_TEST_COMMAND];
     const projectId = store.newProjectId();
-    const itemId = store.newItemId();
     const workspaceDir = path.join(WORKSPACE_ROOT, projectId);
-    const includePlanner = Boolean(parsed.plannerProvider);
     const involved = involvedFromProject(
       {
         writerProvider: parsed.writerProvider,
         reviewerProvider: parsed.reviewerProvider,
         plannerProvider: parsed.plannerProvider,
       },
-      includePlanner,
+      Boolean(parsed.plannerProvider),
     );
     const busy = slotsBusy(involved);
     if (busy) {
@@ -453,13 +570,6 @@ export function createHttpApp(deps: {
       return;
     }
 
-    const item: PlanItem = {
-      id: itemId,
-      title: parsed.title,
-      prompt: parsed.goal,
-      files: [],
-      status: 'running',
-    };
     store.setProject({
       id: projectId,
       title: parsed.title,
@@ -473,20 +583,62 @@ export function createHttpApp(deps: {
       reviewerProvider: parsed.reviewerProvider,
       maxIterations: parsed.maxIterations ?? DEFAULT_MAX_ITERATIONS,
       messages: [],
-      plan: [item],
+      plan: [],
     });
     store.addMessage('user', parsed.goal);
-    occupy(involved);
+
+    let plan = defaultBuildPlan(parsed.goal);
+    if (oraclePaths.length > 0) {
+      plan = {
+        reply: 'This folder already has tests. I will implement against them and leave them locked.',
+        items: defaultBuildPlan(parsed.goal).items.filter(
+          (item) => inferJobKind(item) === 'code',
+        ),
+      };
+    }
+    if (parsed.plannerProvider) {
+      occupy(involved);
+      try {
+        await git.createWorkspace(`plan_${projectId}`, {
+          sourceDir,
+          oraclePaths,
+          testCommand,
+          persistDir: workspaceDir,
+          empty: !sourceDir,
+        });
+        const result = await adapters[parsed.plannerProvider].run(
+          workspaceDir,
+          planObjectPrompt(parsed.title, parsed.goal),
+          () => {
+            /* plan JSON is parsed, not tailed */
+          },
+          new AbortController().signal,
+        );
+        const parsedPlan = parsePlanObject(result.output);
+        if (parsedPlan) {
+          plan =
+            oraclePaths.length > 0
+              ? parsedPlan
+              : ensureTestsItem(parsedPlan, parsed.goal);
+        }
+      } catch {
+        /* keep default plan */
+      } finally {
+        for (const provider of involved) {
+          store.setBusy(provider, false);
+        }
+      }
+    }
+
+    store.addMessage('orchestrator', plan.reply);
+    store.applyPlanObject(plan, '');
+    startEligibleItems();
     const live = store.getProject();
     if (!live) {
       sendError(res, 500, 'RESET_FAILED', 'failed to create project');
       return;
     }
-    const task = store.addTask(launchBodyForItem(live, item, includePlanner));
-    store.patchPlanItem(itemId, { status: 'running', taskId: task.id });
-    store.updateProject({ activeTaskId: task.id });
-    res.status(201).json({ projectId, taskId: task.id });
-    startLoop(task.id);
+    res.status(201).json({ projectId, taskId: live.activeTaskId ?? '' });
   });
 
   app.post('/api/projects/:id/messages', async (req, res) => {
@@ -511,6 +663,10 @@ export function createHttpApp(deps: {
     const busy = slotsBusy(involved);
     if (busy) {
       sendError(res, 409, 'SLOT_BUSY', `${busy} is already running a task`);
+      return;
+    }
+    if (project.shards) {
+      sendError(res, 409, 'SLOT_BUSY', 'parallel shards are still merging');
       return;
     }
 
@@ -539,6 +695,7 @@ export function createHttpApp(deps: {
           oraclePaths: project.oraclePaths,
           testCommand: project.testCommand,
           persistDir: project.workspaceDir,
+          empty: !project.sourceDir,
         });
         const planJson = JSON.stringify(
           project.plan.map((item) => ({
@@ -599,11 +756,11 @@ export function createHttpApp(deps: {
       sendError(res, 400, 'BAD_REQUEST', 'project has no plan items');
       return;
     }
-    const started = startProjectItem(
-      live,
-      { ...item, prompt: followItem.prompt || item.prompt },
-      false,
-    );
+    const started = startProjectItem(live, {
+      ...item,
+      kind: 'code',
+      prompt: followItem.prompt || item.prompt,
+    });
     if (typeof started !== 'string') {
       sendError(res, started.status, started.code, started.error);
       return;

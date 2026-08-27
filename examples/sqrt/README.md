@@ -1,5 +1,3 @@
-# Integer square root (Phase D demo)
+# Optional sample tree
 
-This tree is a **different job** from `fixture/` (`parseIndex`). LoopSync copies it into an isolated workspace, locks `sqrt.test.js`, and runs `node --test`.
-
-`integerSqrt` currently returns `0`. The test expects `integerSqrt(9) === 3`. There is no `parse.js` here — a successful SHA must contain `sqrt.js`, not the homework parser.
+Not the default LoopSync job. Paste this folder if you want a pre-existing `integerSqrt` tree. The dashboard starts **empty** and writes tests alongside implementation unless you point it at a folder that already has tests.

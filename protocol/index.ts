@@ -13,6 +13,8 @@ export type TaskStatus =
   | 'succeeded'
   | 'failed';
 
+export type JobKind = 'tests' | 'code';
+
 export type StepId = 'writer' | 'tests' | 'review' | 'git';
 export type StepStatus = 'pending' | 'running' | 'ok' | 'fail' | 'skipped';
 
@@ -53,6 +55,10 @@ export interface TaskState {
   oraclePaths?: string[];
   testCommand?: string[];
   persistDir?: string;
+  jobKind?: JobKind;
+  skipTests?: boolean;
+  skipCommit?: boolean;
+  empty?: boolean;
 }
 
 export interface TimelineEvent {
@@ -65,6 +71,8 @@ export interface TimelineEvent {
 export interface OutputFile {
   path: string;
   content: string;
+  /** Frozen oracle — shown in the Code pane, not editable by the writer. */
+  locked?: boolean;
 }
 
 export interface ProviderSlot {
@@ -122,6 +130,10 @@ export interface WorkspaceContext {
   testCommand?: readonly string[];
   /** Reuse this directory on follow-up. Do not recopy from sourceDir. */
   persistDir?: string;
+  /** Empty tree instead of copying fixture/ or sourceDir. */
+  empty?: boolean;
+  /** tests = author test files (red is OK). code = implement against a frozen oracle. */
+  mode?: JobKind;
 }
 
 export type ChatRole = 'user' | 'orchestrator';
@@ -143,13 +155,14 @@ export interface PlanItem {
   doneWhen?: string;
   status: PlanItemStatus;
   taskId?: string;
+  kind?: JobKind;
 }
 
 export interface ProjectState {
   id: string;
   title: string;
   goal: string;
-  sourceDir: string;
+  sourceDir?: string;
   workspaceDir: string;
   testCommand: string[];
   oraclePaths: string[];
@@ -160,6 +173,7 @@ export interface ProjectState {
   messages: ChatMessage[];
   plan: PlanItem[];
   activeTaskId?: string;
+  shards?: { testsDir: string; codeDir: string };
 }
 
 export interface DashboardDefaults {
@@ -177,6 +191,7 @@ export interface PlanObject {
     files?: string[];
     doneWhen?: string;
     prompt?: string;
+    kind?: JobKind;
   }>;
 }
 
@@ -199,8 +214,14 @@ export interface GitRuntime {
     dir: string,
     ctx?: WorkspaceContext,
   ): Promise<{ dirty: boolean; oracleSha: string }>;
-  /** Changed/new production files vs the source (never oracle tests). */
+  /** Changed/new files vs the source. Locked tests are included. */
   listOutputs(dir: string, ctx?: WorkspaceContext): Promise<OutputFile[]>;
+  listTestFiles(dir: string): Promise<string[]>;
+  mergeShards(
+    dest: string,
+    testsDir: string,
+    codeDir: string,
+  ): Promise<void>;
 }
 
 export interface LaunchTaskBody {
@@ -215,12 +236,16 @@ export interface LaunchTaskBody {
   oraclePaths?: string[];
   testCommand?: string[];
   persistDir?: string;
+  jobKind?: JobKind;
+  skipTests?: boolean;
+  skipCommit?: boolean;
+  empty?: boolean;
 }
 
 export interface CreateProjectBody {
   title: string;
   goal: string;
-  sourceDir: string;
+  sourceDir?: string;
   testCommand?: string[];
   oraclePaths?: string[];
   writerProvider: ProviderType;
@@ -413,11 +438,13 @@ Title: ${title}
 User task:
 ${userPrompt}
 
+Split the work so tests and production code are separate items. Prefer that split even if one person could do both — different processes, different context. If the repo already has tests, skip the tests item.
+
 Reply with a JSON object (optionally in a fenced json code block) then a line that is exactly:
 PLAN_DONE
 
 The JSON shape:
-{"reply":"short message to the user","items":[{"title":"one work item","files":["path"],"doneWhen":"how we know it worked","prompt":"instructions for the writer"}]}`;
+{"reply":"short message to the user","items":[{"kind":"tests","title":"Write tests","files":["foo.test.js"],"doneWhen":"tests describe the contract","prompt":"author assertions, no production code"},{"kind":"code","title":"Implement","files":["foo.js"],"doneWhen":"tests pass","prompt":"implement without changing tests"}]}`;
 }
 
 export function steerPrompt(
@@ -446,7 +473,7 @@ Reply with a JSON object (optionally in a fenced json code block) then a line th
 PLAN_DONE
 
 The JSON shape:
-{"reply":"short message to the user","items":[{"title":"one work item","files":["path"],"doneWhen":"how we know it worked","prompt":"instructions for the writer including the latest steering"}]}`;
+{"reply":"short message to the user","items":[{"kind":"tests|code","title":"one work item","files":["path"],"doneWhen":"how we know it worked","prompt":"instructions including the latest steering"}]}`;
 }
 
 export function projectWriterPrompt(opts: {
@@ -503,6 +530,7 @@ export function parsePlanObject(output: string): PlanObject | null {
       doneWhen:
         typeof item.doneWhen === 'string' ? item.doneWhen : undefined,
       prompt: typeof item.prompt === 'string' ? item.prompt : undefined,
+      kind: item.kind === 'tests' || item.kind === 'code' ? item.kind : undefined,
     });
   }
   if (items.length === 0) {
@@ -535,4 +563,69 @@ function extractJsonObject(text: string): unknown | null {
     }
   }
   return null;
+}
+
+export function isTestPath(rel: string): boolean {
+  const base = rel.split(/[/\\]/).pop() ?? rel;
+  return (
+    /\.(test|spec)\.(js|mjs|cjs|ts)$/i.test(base) ||
+    /(_test|\.test)\.py$/i.test(base)
+  );
+}
+
+export function inferJobKind(item: {
+  kind?: JobKind;
+  title?: string;
+  files?: string[];
+}): JobKind {
+  if (item.kind === 'tests' || item.kind === 'code') {
+    return item.kind;
+  }
+  if ((item.files ?? []).some((file) => isTestPath(file))) {
+    return 'tests';
+  }
+  if (/test/i.test(item.title ?? '')) {
+    return 'tests';
+  }
+  return 'code';
+}
+
+export function defaultBuildPlan(goal: string): PlanObject {
+  return {
+    reply:
+      'I will write tests and implementation as separate steps. Tests freeze before a SHA is allowed.',
+    items: [
+      {
+        kind: 'tests',
+        title: 'Write tests',
+        files: [],
+        doneWhen: 'Automated tests exist that describe the goal',
+        prompt: `Write automated tests only for this goal. Do not implement production code. Do not git commit.
+
+GOAL:
+${goal}`,
+      },
+      {
+        kind: 'code',
+        title: 'Implement',
+        files: [],
+        doneWhen: 'The tests pass',
+        prompt: `Implement production code so the tests pass. Do not change test files. Do not git commit.
+
+GOAL:
+${goal}`,
+      },
+    ],
+  };
+}
+
+export function ensureTestsItem(plan: PlanObject, goal: string): PlanObject {
+  if (plan.items.some((item) => inferJobKind(item) === 'tests')) {
+    return plan;
+  }
+  const tests = defaultBuildPlan(goal).items[0];
+  return {
+    reply: plan.reply,
+    items: [tests, ...plan.items.map((item) => ({ ...item, kind: inferJobKind(item) }))],
+  };
 }

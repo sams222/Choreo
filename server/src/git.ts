@@ -6,6 +6,7 @@ import {
   DEFAULT_TEST_COMMAND,
   ORACLE_PATHS,
   WORKSPACE_ROOT,
+  isTestPath,
   type GitRuntime,
   type OutputFile,
   type WorkspaceContext,
@@ -13,17 +14,26 @@ import {
 
 export function createGitRuntime(fixtureDir: string): GitRuntime {
   function resolveCtx(ctx?: WorkspaceContext) {
-    const sourceDir = path.resolve(ctx?.sourceDir ?? fixtureDir);
-    const oraclePaths = [...(ctx?.oraclePaths ?? ORACLE_PATHS)];
+    const empty = Boolean(ctx?.empty) || (Boolean(ctx?.persistDir) && !ctx?.sourceDir);
+    const sourceDir = empty
+      ? undefined
+      : path.resolve(ctx?.sourceDir ?? fixtureDir);
+    const oraclePaths =
+      ctx?.oraclePaths !== undefined
+        ? [...ctx.oraclePaths]
+        : empty
+          ? []
+          : [...ORACLE_PATHS];
     const testCommand = [...(ctx?.testCommand ?? DEFAULT_TEST_COMMAND)];
     const persistDir = ctx?.persistDir
       ? path.resolve(ctx.persistDir)
       : undefined;
-    return { sourceDir, oraclePaths, testCommand, persistDir };
+    const mode = ctx?.mode;
+    return { sourceDir, oraclePaths, testCommand, persistDir, empty, mode };
   }
 
   async function createWorkspace(taskId: string, ctx?: WorkspaceContext) {
-    const { sourceDir, persistDir } = resolveCtx(ctx);
+    const { sourceDir, persistDir, empty } = resolveCtx(ctx);
     fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
     const dir = persistDir ?? path.join(WORKSPACE_ROOT, taskId);
     const reusing =
@@ -35,7 +45,11 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
       if (fs.existsSync(dir)) {
         fs.rmSync(dir, { recursive: true, force: true });
       }
-      fs.cpSync(sourceDir, dir, { recursive: true });
+      if (sourceDir && fs.existsSync(sourceDir)) {
+        fs.cpSync(sourceDir, dir, { recursive: true });
+      } else {
+        fs.mkdirSync(dir, { recursive: true });
+      }
     }
 
     const hadGit = fs.existsSync(path.join(dir, '.git'));
@@ -46,11 +60,11 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     await runGit(dir, ['config', 'user.name', 'LoopSync']);
     await runGit(dir, ['config', 'commit.gpgsign', 'false']);
     if (!hadGit) {
-      if (persistDir || ctx?.sourceDir) {
+      if (empty || persistDir || ctx?.sourceDir) {
         await runGit(dir, ['add', '-A']);
         await runGit(
           dir,
-          ['commit', '-m', 'loopsync baseline', '--no-verify'],
+          ['commit', '-m', 'loopsync baseline', '--allow-empty', '--no-verify'],
           { env: { GIT_EDITOR: 'true' } },
         );
       } else {
@@ -62,7 +76,7 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     }
     await runGit(dir, ['checkout', '-B', `loopsync/${taskId}`]);
 
-    if (!ctx?.sourceDir && !persistDir) {
+    if (!ctx?.sourceDir && !persistDir && !empty) {
       if (
         !fs.existsSync(path.join(dir, 'parse.js')) ||
         !fs.existsSync(path.join(dir, 'parse.test.js'))
@@ -99,22 +113,27 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     message: string,
     ctx?: WorkspaceContext,
   ) {
-    const { sourceDir, oraclePaths } = resolveCtx(ctx);
+    const { sourceDir, oraclePaths, mode } = resolveCtx(ctx);
     const resolved = path.resolve(dir);
     const fixture = path.resolve(fixtureDir);
     if (resolved === fixture || resolved.startsWith(fixture + path.sep)) {
       throw new Error('Never commit in original fixture/');
     }
-    if (resolved === sourceDir || resolved.startsWith(sourceDir + path.sep)) {
+    if (
+      sourceDir &&
+      (resolved === sourceDir || resolved.startsWith(sourceDir + path.sep))
+    ) {
       throw new Error('Never commit in original source directory');
     }
 
-    if (await isOracleDirty(dir, ctx)) {
+    if (mode !== 'tests' && (await isOracleDirty(dir, ctx))) {
       throw new Error(
         `ORACLE_TAMPERED: ${oraclePaths.join(', ')} changed; refusing commit`,
       );
     }
-    const skip = new Set<string>([...oraclePaths, 'README.md']);
+    const skip = new Set<string>(
+      mode === 'tests' ? ['README.md'] : [...oraclePaths, 'README.md'],
+    );
     const status = await runGit(dir, ['status', '--porcelain']);
     const rels = status.stdout
       .split('\n')
@@ -139,28 +158,31 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     ctx?: WorkspaceContext,
   ): Promise<OutputFile[]> {
     const { sourceDir, oraclePaths } = resolveCtx(ctx);
-    const skip = new Set<string>([
-      ...oraclePaths,
-      'README.md',
-      'package.json',
-    ]);
     const files: OutputFile[] = [];
     walk(dir, '', (rel, abs) => {
-      if (skip.has(rel) || rel.startsWith('.git')) {
+      if (rel.startsWith('.git') || rel === 'README.md' || rel === 'package.json') {
         return;
       }
-      const baseline = path.join(sourceDir, rel);
       const content = fs.readFileSync(abs, 'utf8');
       if (content.length > 80_000) {
         return;
       }
+      const locked = oraclePaths.includes(rel) || isTestPath(rel);
+      const baseline = sourceDir ? path.join(sourceDir, rel) : '';
       const same =
+        Boolean(sourceDir) &&
         fs.existsSync(baseline) &&
         fs.readFileSync(baseline, 'utf8') === content;
-      if (same) {
+      if (same && !locked) {
         return;
       }
-      files.push({ path: rel, content });
+      if (same && locked && oraclePaths.includes(rel)) {
+        files.push({ path: rel, content, locked: true });
+        return;
+      }
+      if (!same) {
+        files.push({ path: rel, content, locked: oraclePaths.includes(rel) });
+      }
     });
     return files.sort((a, b) => a.path.localeCompare(b.path));
   }
@@ -176,19 +198,64 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
 
   async function isOracleDirty(dir: string, ctx?: WorkspaceContext) {
     const { sourceDir, oraclePaths } = resolveCtx(ctx);
+    if (oraclePaths.length === 0) {
+      return false;
+    }
     for (const rel of oraclePaths) {
       const current = path.join(dir, rel);
-      const baseline = path.join(sourceDir, rel);
-      if (!fs.existsSync(current) || !fs.existsSync(baseline)) {
+      if (!fs.existsSync(current)) {
         return true;
       }
       const left = fs.readFileSync(current);
-      const right = fs.readFileSync(baseline);
-      if (!left.equals(right)) {
+      const fromSource =
+        sourceDir && fs.existsSync(path.join(sourceDir, rel))
+          ? fs.readFileSync(path.join(sourceDir, rel))
+          : null;
+      if (fromSource && !left.equals(fromSource)) {
+        return true;
+      }
+      if (fromSource) {
+        continue;
+      }
+      const shown = await runGit(dir, ['show', `HEAD:${rel}`], { allowFail: true });
+      if (shown.exitCode !== 0) {
+        continue;
+      }
+      if (!left.equals(Buffer.from(shown.stdout))) {
         return true;
       }
     }
     return false;
+  }
+
+  async function listTestFiles(dir: string): Promise<string[]> {
+    const files: string[] = [];
+    walk(dir, '', (rel) => {
+      if (isTestPath(rel)) {
+        files.push(rel);
+      }
+    });
+    return files.sort();
+  }
+
+  async function mergeShards(dest: string, testsDir: string, codeDir: string) {
+    fs.mkdirSync(dest, { recursive: true });
+    walk(codeDir, '', (rel, abs) => {
+      if (isTestPath(rel)) {
+        return;
+      }
+      const target = path.join(dest, rel);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(abs, target);
+    });
+    walk(testsDir, '', (rel, abs) => {
+      if (!isTestPath(rel)) {
+        return;
+      }
+      const target = path.join(dest, rel);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.copyFileSync(abs, target);
+    });
   }
 
   function oracleSha(dir: string, ctx?: WorkspaceContext) {
@@ -210,6 +277,8 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     resetAll,
     checkOracle,
     listOutputs,
+    listTestFiles,
+    mergeShards,
   };
 }
 

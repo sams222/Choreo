@@ -80,6 +80,34 @@ body {
   text-transform: uppercase;
 }
 
+.brand {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+
+.brand h1 {
+  flex: 1;
+}
+
+.text-reset {
+  margin-left: auto;
+  min-height: 32px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.oracle-chip.open {
+  color: var(--info);
+}
+
 .brand h1,
 .activity-head h2,
 .files-head h2 {
