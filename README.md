@@ -56,6 +56,7 @@ Open [http://127.0.0.1:4055](http://127.0.0.1:4055). Paste a folder, set the goa
 - **[examples/sqrt/](examples/sqrt/)** — Phase D demo: `integerSqrt` / locked `sqrt.test.js`
 - **[fixture/](fixture/)** — homework that `node --test` fails with `4 !== 5`
 - **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration (goal → plan → judged steps)
+- **[docs/KERNEL_RISKS.md](docs/KERNEL_RISKS.md)** — spawn, review, oracle, cancel, slots, retry gaps
 
 ## Proven CLI flags (do not change)
 
