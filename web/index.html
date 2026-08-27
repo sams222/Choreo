@@ -3,12 +3,12 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LoopSync</title>
-    <link rel="stylesheet" href="styles.css?v=live2" />
+    <title>Choreo</title>
+    <link rel="stylesheet" href="styles.css?v=refined5" />
   </head>
   <body>
     <div id="unreachable" class="banner" hidden>
-      Can’t reach LoopSync on :4055
+      Can’t reach Choreo on :4055
     </div>
     <div id="replayBanner" class="banner replay" hidden>
       Replaying a recorded run at 10× — no CLIs are running.
@@ -17,12 +17,22 @@
     <div class="app">
       <header class="top">
         <div class="brand">
-          <p class="eyebrow">LoopSync</p>
+          <div class="brand-mark" aria-hidden="true"><i></i><i></i></div>
+          <p class="eyebrow">Choreo</p>
           <h1 id="app-title">New project</h1>
         </div>
 
         <div class="head-mid">
-          <ul id="slots" class="slots" aria-label="Model slots"></ul>
+          <ul id="slots" class="slots" aria-label="Model slots">
+            <li class="slot claude idle">
+              <span class="avatar provider-logo claude" aria-hidden="true"></span>
+              <span class="slot-name">Claude</span><span class="slot-state">idle</span>
+            </li>
+            <li class="slot codex idle">
+              <span class="avatar provider-logo codex" aria-hidden="true"></span>
+              <span class="slot-name">Codex</span><span class="slot-state">idle</span>
+            </li>
+          </ul>
           <ol id="stepper" class="stepper" aria-label="Plan progress" hidden></ol>
         </div>
 
@@ -35,17 +45,13 @@
 
       <main class="stage" aria-labelledby="app-title">
         <div id="empty" class="hero">
-          <div class="orbit" aria-hidden="true">
-            <span class="node tests">Unit tests</span>
-            <span class="node orch">Orchestrator</span>
-            <span class="node code">Code</span>
-            <span class="beam"></span>
-          </div>
+          <div class="hero-kicker"><span></span> Multi-agent workspace</div>
+          <h2>From intent to verified code.</h2>
           <p class="hero-copy">
-            State a goal. LoopSync plans, then writes tests and production code
-            as different processes — in parallel when two agents are free — and
-            will not take a SHA until the tests are frozen.
+            Describe the outcome. Choreo coordinates planning, tests, implementation,
+            and review using the CLIs you already trust.
           </p>
+          <p class="hero-note"><span>Tests freeze first</span><span>Independent review</span><span>One verified SHA</span></p>
         </div>
         <ol id="feed" class="feed" aria-live="polite" aria-relevant="additions" hidden></ol>
       </main>
@@ -107,15 +113,15 @@
                   </select>
                 </label>
                 <label>
-                  Attempts
+                  Recovery cap
                   <input
                     id="maxIterations"
                     name="ls-attempts"
                     type="number"
                     min="1"
-                    max="5"
+                    max="12"
                     step="1"
-                    value="2"
+                    value="5"
                     autocomplete="new-password"
                   />
                 </label>
@@ -128,9 +134,9 @@
             <textarea
               id="prompt"
               name="ls-goal"
-              rows="3"
+              rows="2"
               autocomplete="new-password"
-              placeholder="What should we build? Tests and implementation run as separate processes — send again mid-run to steer."
+              placeholder="Describe what you want to build…"
             ></textarea>
             <div class="composer-actions">
               <button type="submit" id="send">Send</button>
@@ -139,13 +145,12 @@
           </div>
           <p id="formError" class="form-error" hidden></p>
           <p id="composerHint" class="composer-hint">
-            Tests freeze before a SHA. Coding agents never run
-            <code>git commit</code>.
+            Tests freeze before a SHA · commits are owned by Choreo
           </p>
         </form>
 
         <button type="button" id="reset" class="text-reset" hidden>
-          Clear this project
+          Reset project
         </button>
       </footer>
     </div>
@@ -162,6 +167,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=live2"></script>
+    <script src="app.js?v=choreo1"></script>
   </body>
 </html>

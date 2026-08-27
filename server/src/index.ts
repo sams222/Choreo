@@ -20,6 +20,6 @@ const ledger = createLedger(defaultLedgerPath());
 const app = createHttpApp({ store, git, adapters, ledger, repoRoot });
 
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`LoopSync listening on 0.0.0.0:${PORT}`);
+  console.log(`Choreo listening on 0.0.0.0:${PORT}`);
   console.log(`Ledger ${ledger.path}`);
 });

@@ -1,5 +1,5 @@
 /**
- * LOOPSYNC FROZEN PROTOCOL
+ * CHOREO FROZEN PROTOCOL
  * Do not change field names without a team shout in the group chat.
  * JSON examples live in protocol/examples/. Person 1–4 all code against this file.
  */
@@ -77,7 +77,7 @@ export const ROLE_LABEL: Record<AgentRole, string> = {
   tests: 'Test author',
   review: 'Reviewer',
   git: 'Git (Node-owned)',
-  loop: 'LoopSync',
+  loop: 'Choreo',
 };
 
 export const PROVIDER_LABEL: Record<ProviderType, string> = {
@@ -516,12 +516,19 @@ export interface ErrorResponse {
 
 export const PORT = 4055;
 export const POLL_MS = 300;
-export const CLI_TIMEOUT_MS = 120_000;
-export const DEFAULT_MAX_ITERATIONS = 2;
+const configuredCliTimeout = Number.parseInt(
+  process.env.LOOPSYNC_CLI_TIMEOUT_MS ?? '',
+  10,
+);
+export const CLI_TIMEOUT_MS =
+  Number.isFinite(configuredCliTimeout) && configuredCliTimeout >= 60_000
+    ? configuredCliTimeout
+    : 30 * 60_000;
+export const DEFAULT_MAX_ITERATIONS = 5;
 export const WORKSPACE_ROOT = '/tmp/loopsync-workspaces';
 
 /**
- * Where isolated worktrees live. Overridable so two LoopSync instances (or two
+ * Where isolated worktrees live. Overridable so two Choreo instances (or two
  * test files) never reset each other's trees out from under a running loop.
  */
 export function workspaceRoot(): string {
@@ -539,7 +546,7 @@ export const DEFAULT_LAUNCH: LaunchTaskBody = {
   prompt:
     'The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.',
   provider: 'codex',
-  maxIterations: 2,
+  maxIterations: DEFAULT_MAX_ITERATIONS,
 };
 
 export const DEFAULT_SQRT: Pick<
@@ -630,7 +637,7 @@ ${testOutput}`;
 }
 
 export function planPrompt(title: string, userPrompt: string): string {
-  return `You are the orchestration agent for LoopSync. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
+  return `You are the orchestration agent for Choreo. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
 
 Title: ${title}
 
@@ -696,7 +703,7 @@ export function parseReviewVerdict(output: string): ReviewVerdict {
 }
 
 export function planObjectPrompt(title: string, userPrompt: string): string {
-  return `You are the orchestration agent for LoopSync. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
+  return `You are the orchestration agent for Choreo. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
 
 Title: ${title}
 
@@ -718,7 +725,7 @@ export function steerPrompt(
   thread: string,
   userText: string,
 ): string {
-  return `You are the orchestration agent for LoopSync. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
+  return `You are the orchestration agent for Choreo. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
 
 The user is steering an existing project. Patch the plan to follow their latest message. Keep locked tests locked.
 

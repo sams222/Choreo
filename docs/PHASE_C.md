@@ -1,4 +1,4 @@
-# LoopSync — Phase C (2026 loop engineering)
+# Choreo — Phase C (2026 loop engineering)
 
 Sequel to [`BUILD_PLAN.md`](BUILD_PLAN.md) phases 0–4. **Do not start this until Gate 2 is true.** The kernel from Tracks A–C stays; this wraps it with independent **steps**, a locked oracle, caps, an optional reviewer agent, and (later) a queue.
 
@@ -10,7 +10,7 @@ Agent playbook: [`person-5-phase-c.md`](person-5-phase-c.md). Kernel workflow: [
 
 Phases 0–4 ship a demo kernel: one user Launch, one writer CLI, `node --test` as judge, at most `maxIterations` retries, commit only if tests pass. That is the right inner mechanism. It is not 2026 loop engineering: unattended work, independent checker vs maker, tamper-proof tests, caps/audit, a separate audit agent.
 
-Phase C keeps `runLoop` as the only executor. Node still spawns every step. Recursive spawn (a CLI starts a subagent that starts another LoopSync loop) is **stretch**, not this phase.
+Phase C keeps `runLoop` as the only executor. Node still spawns every step. Recursive spawn (a CLI starts a subagent that starts another Choreo loop) is **stretch**, not this phase.
 
 ---
 
@@ -148,7 +148,7 @@ Do not change `parse.test.js` in `fixture/`. Do not parse TAP for pass/fail.
 
 **At Gate 2:** `createAdapters()` writer spawn.
 
-**Change:** reviewer is a **second** `run()` on `claude` or `codex` with a **review prompt**, new process, same `shell: false` and 120s. Do not add Gemini, FakeAdapter, or `resume`. Do not implement LoopSync spawn-from-CLI tools. Usage tokens on `RunResult` only if trivial; otherwise wall clock in the ledger.
+**Change:** reviewer is a **second** `run()` on `claude` or `codex` with a **review prompt**, new process, same `shell: false` and 120s. Do not add Gemini, FakeAdapter, or `resume`. Do not implement Choreo spawn-from-CLI tools. Usage tokens on `RunResult` only if trivial; otherwise wall clock in the ledger.
 
 ### `server/src/stubs.ts`
 
@@ -208,7 +208,7 @@ Do these **in order**. Person-5 **stops after step visibility**. Finder, jobs fi
 - Parallel writer + reviewer on the demo laptop
 - LLM work-finder
 
-Inner tool-use **inside** one `claude -p` / `codex exec` may already happen; meter it later. Do not expose it as LoopSync child tasks.
+Inner tool-use **inside** one `claude -p` / `codex exec` may already happen; meter it later. Do not expose it as Choreo child tasks.
 
 ---
 

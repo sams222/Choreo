@@ -1,4 +1,4 @@
-# LoopSync — team plan for tomorrow
+# Choreo — team plan for tomorrow
 
 ## What we are building
 

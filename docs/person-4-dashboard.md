@@ -60,7 +60,7 @@ If `fixture/.git` missing:
 cd fixture
 git init
 git add parse.js parse.test.js package.json
-git -c user.email=loopsync@local -c user.name=LoopSync commit -m "failing parseIndex"
+git -c user.email=choreo@local -c user.name=Choreo commit -m "failing parseIndex"
 ```
 
 **Verify:** `cd fixture && node --test` fails `4 !== 5`. Do not commit a passing `parse.js`.

@@ -1,4 +1,4 @@
-# LoopSync — UI/UX review and demo plan
+# Choreo — UI/UX review and demo plan
 
 Reviewed at commit `630c37c` (main). Scope: the dashboard in [`web/`](../web/), the state it renders from [`server/src/`](../server/src/), and what it will take to wow judges. Kernel-level risks are already covered in [`KERNEL_RISKS.md`](KERNEL_RISKS.md); this doc stays on the product surface.
 

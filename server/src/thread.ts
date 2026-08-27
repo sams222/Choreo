@@ -8,7 +8,6 @@
 import {
   PROVIDER_LABEL,
   ROLE_LABEL,
-  inferJobKind,
   type AgentRole,
   type ChatMessage,
   type PlanItem,
@@ -160,13 +159,14 @@ function timelineItems(task: TaskState, project?: ProjectState): ThreadItem[] {
   return out;
 }
 
-function commitItem(task: TaskState): ThreadItem | null {
+function commitItem(task: TaskState, project?: ProjectState): ThreadItem | null {
   if (task.status !== 'succeeded' || !task.commitSha) {
     return null;
   }
+  const completedAt = Math.max(task.endedAt ?? 0, project?.frozenAt ?? 0);
   return {
     id: `commit:${task.id}`,
-    ts: (task.endedAt ?? Date.now()) + 1,
+    ts: (completedAt || Date.now()) + 1,
     kind: 'commit',
     role: 'git',
     who: ROLE_LABEL.git,
@@ -186,6 +186,8 @@ export function buildThread(snapshot: ServerSnapshot): ThreadItem[] {
   const project = snapshot.project;
   const tasks = snapshot.tasks;
   const items: ThreadItem[] = [];
+  const parallel = parallelPair(tasks, project);
+  const parallelIds = new Set(parallel?.map((task) => task.id) ?? []);
 
   for (const message of project?.messages ?? []) {
     items.push(messageItem(message));
@@ -228,24 +230,35 @@ export function buildThread(snapshot: ServerSnapshot): ThreadItem[] {
   }
 
   for (const task of tasks) {
-    items.push(...timelineItems(task, project));
-    const commit = commitItem(task);
+    if (!parallelIds.has(task.id)) {
+      items.push(...timelineItems(task, project));
+    }
+    const commit =
+      parallelIds.has(task.id) && task.jobKind === 'tests'
+        ? null
+        : commitItem(task, project);
     if (commit) {
       items.push(commit);
     }
   }
 
   const live = tasks.filter(isInFlight);
-  if (project?.shards && live.length >= 2) {
-    const [left, right] = orderShards(live, project);
+  const parallelLive = parallel?.filter(isInFlight) ?? [];
+  if (parallel) {
+    const [left, right] = parallel;
+    const complete = parallel.every((task) => task.status === 'succeeded');
     items.push({
       id: 'race',
-      ts: Math.min(...live.map((task) => task.startedAt ?? Date.now())),
+      ts: Math.min(...parallel.map((task) => task.startedAt ?? Date.now())),
       kind: 'race',
       role: 'loop',
       who: 'Parallel run',
-      title: 'Two processes, two worktrees',
-      body: 'Tests and implementation are racing in separate git trees.',
+      title: complete ? 'Parallel work complete' : 'Building in parallel',
+      body: complete
+        ? 'Both independent worktrees are ready to merge.'
+        : parallelLive.length === 1
+          ? 'One lane is complete. The other continues in its own worktree.'
+          : 'Tests and implementation are running at the same time in separate worktrees.',
       taskIds: [left.id, right.id],
     });
   } else {
@@ -254,13 +267,13 @@ export function buildThread(snapshot: ServerSnapshot): ThreadItem[] {
     }
   }
 
-  if (project?.shards && live.length === 0) {
+  if (project?.shards && parallel && parallelLive.length === 0) {
     items.push({
       id: 'merge',
       ts: Date.now(),
       kind: 'merge',
       role: 'loop',
-      who: 'LoopSync',
+      who: 'Choreo',
       title: 'Merging the two worktrees',
       body: 'Both branches finished. Combining shards before the tests can freeze.',
     });
@@ -289,18 +302,24 @@ export function buildThread(snapshot: ServerSnapshot): ThreadItem[] {
   return items;
 }
 
-function orderShards(
-  live: TaskState[],
-  project: ProjectState,
-): [TaskState, TaskState] {
-  const tests = live.find((task) => {
-    const item = planItemFor(project, task);
-    return (
-      task.jobKind === 'tests' || (item && inferJobKind(item) === 'tests')
-    );
-  });
-  const code = live.find((task) => task !== tests);
-  return [tests ?? live[0], code ?? live[1] ?? live[0]];
+function parallelPair(
+  tasks: TaskState[],
+  project?: ProjectState,
+): [TaskState, TaskState] | null {
+  if (!project) return null;
+  const code = tasks.find(
+    (task) =>
+      task.projectId === project.id &&
+      task.jobKind === 'code' &&
+      (task.skipCommit === true || project.shards !== undefined),
+  );
+  const tests = tasks.find(
+    (task) =>
+      task.projectId === project.id &&
+      task.jobKind === 'tests' &&
+      task.startedAt !== undefined,
+  );
+  return tests && code ? [tests, code] : null;
 }
 
 export { isInFlight, PROVIDER_LABEL };

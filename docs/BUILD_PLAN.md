@@ -1,4 +1,4 @@
-# LoopSync — general build plan
+# Choreo — general build plan
 
 One person **builds** (Cursor + agents + git push). Everyone else **debugs** live runs or **plans the presentation**. The four files `docs/person-*.md` are **agent tracks** (contract + steps in one place), not four human coding streams.
 
@@ -233,4 +233,4 @@ phase:
 - FakeAdapter on stage
 - Gemini
 - Phase C before Gate 2
-- Recursive CLI-spawned LoopSync loops (stretch; see [`PHASE_C.md`](PHASE_C.md))
+- Recursive CLI-spawned Choreo loops (stretch; see [`PHASE_C.md`](PHASE_C.md))

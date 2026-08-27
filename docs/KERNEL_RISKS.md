@@ -1,4 +1,4 @@
-# LoopSync — kernel risks (where the loop can lie)
+# Choreo — kernel risks (where the loop can lie)
 
 Status as of commit `40918b5` (`main`). These are gaps in the **running kernel**, not in [`PLATFORM.md`](PLATFORM.md) plans. `node --test` as pass/fail is the stable core. Spawn, review, cancel, commit, and slots are where a live run goes wrong.
 
@@ -299,4 +299,4 @@ A test fail clears `lastReviewOutput`, so TAP wins after a red test. After `REVI
 - **Fixture isolation.** Original `fixture/` is not the workspace. Reset is not supposed to touch it.
 - **No WebSocket.** Polling `GET /api/state` cannot desync a push channel.
 
-The kernel you can trust is: **copy fixture → spawn writer → `node --test`**. Every layer around that (reviewer, planner, cancel, commit, slots) is where LoopSync is most susceptible to error.
+The kernel you can trust is: **copy fixture → spawn writer → `node --test`**. Every layer around that (reviewer, planner, cancel, commit, slots) is where Choreo is most susceptible to error.

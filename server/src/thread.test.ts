@@ -143,6 +143,47 @@ test('two in-flight tasks with shards collapse into one race card', () => {
   );
 });
 
+test('the parallel card keeps both lanes when tests finish first', () => {
+  const tests = task({
+    id: 'task_tests',
+    status: 'succeeded',
+    endedAt: T0 + 300,
+    timeline: [
+      {
+        id: 'tests_ready',
+        role: 'tests',
+        title: 'Tests authored',
+        body: 'sqrt.test.js',
+        ts: T0 + 250,
+      },
+    ],
+  });
+  const code = task({
+    id: 'task_code',
+    jobKind: 'code',
+    provider: 'codex',
+    skipCommit: true,
+    startedAt: T0 + 110,
+  });
+  const base = snapshot({ tasks: [tests, code] });
+  base.project!.shards = { testsDir: '/tmp/a', codeDir: '/tmp/b' };
+
+  const thread = buildThread(base);
+  const race = thread.find((item) => item.kind === 'race');
+  assert.deepEqual(race?.taskIds, ['task_tests', 'task_code']);
+  assert.match(race?.body ?? '', /One lane is complete/);
+  assert.equal(
+    thread.some((item) => item.title === 'Tests authored'),
+    false,
+    'lane updates stay inside the parallel card instead of interrupting the thread',
+  );
+  assert.equal(
+    thread.some((item) => item.kind === 'live'),
+    false,
+    'implementation does not collapse back into a generic live block',
+  );
+});
+
 test('a single in-flight task gets its own live card with steps', () => {
   const base = snapshot({ tasks: [task()] });
   const live = buildThread(base).find((item) => item.kind === 'live');

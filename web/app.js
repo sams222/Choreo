@@ -2,7 +2,7 @@ const API = '';
 /** Fallback cadence only — the SSE stream is the primary transport (P0.2). */
 const POLL_MS = 300;
 /** Mirrors CLI_TIMEOUT_MS in protocol/index.ts. */
-const CLI_TIMEOUT_MS = 120_000;
+const CLI_TIMEOUT_MS = 30 * 60_000;
 const REPLAY_SPEED = 10;
 
 const STATUS_LABELS = {
@@ -31,12 +31,12 @@ const PLAN_GLYPH = {
   failed: '✕',
 };
 const EVENT_GLYPH = {
-  tool: '🔧',
-  text: '💬',
+  tool: '↳',
+  text: '·',
   reasoning: '…',
-  result: '■',
-  error: '⚠',
-  start: '▸',
+  result: '✓',
+  error: '!',
+  start: '→',
 };
 
 const els = {};
@@ -99,6 +99,12 @@ function el(tag, className, text) {
   return node;
 }
 
+function providerAvatar(provider) {
+  const avatar = el('span', `avatar provider-logo ${provider}`);
+  avatar.setAttribute('aria-hidden', 'true');
+  return avatar;
+}
+
 function formatElapsed(ms) {
   const sec = Math.max(0, Math.floor(ms / 1000));
   const m = Math.floor(sec / 60);
@@ -141,9 +147,7 @@ function identity(item, provider) {
   const row = el('div', 'identity');
   const who = provider ?? item.provider;
   if (who) {
-    const avatar = el('span', `avatar ${who}`, PROVIDER_LABEL[who][0]);
-    avatar.setAttribute('aria-hidden', 'true');
-    row.append(avatar);
+    row.append(providerAvatar(who));
     row.append(el('strong', `provider ${who}`, PROVIDER_LABEL[who]));
     row.append(el('span', 'sep', '·'));
   }
@@ -211,9 +215,7 @@ function waitingLine(task) {
   const startedAt = currentStepStart(task) ?? task?.startedAt;
   if (!startedAt) return 'Starting the process…';
   const spent = Math.max(0, serverNow() - startedAt);
-  return `No tokens yet · ${Math.floor(spent / 1000)}s / ${Math.round(
-    CLI_TIMEOUT_MS / 1000,
-  )}s before the CLI times out`;
+  return `Working · ${formatElapsed(spent)} elapsed`;
 }
 
 function currentStepStart(task) {
@@ -226,13 +228,14 @@ function timeoutMeter(task) {
   if (!startedAt) return null;
   const spent = Math.max(0, serverNow() - startedAt);
   const ratio = Math.min(1, spent / CLI_TIMEOUT_MS);
+  if (ratio < 0.75) return null;
   const wrap = el('div', 'meter');
   wrap.dataset.hot = ratio > 0.75 ? 'true' : 'false';
   const bar = el('span', 'meter-bar');
   bar.style.width = `${(ratio * 100).toFixed(1)}%`;
   wrap.append(bar);
   wrap.append(
-    el('span', 'meter-text', `${Math.floor(spent / 1000)}s / ${Math.round(CLI_TIMEOUT_MS / 1000)}s`),
+    el('span', 'meter-text', 'Approaching the configured agent runtime limit'),
   );
   return wrap;
 }
@@ -248,7 +251,7 @@ function fileChips(files) {
     const summary = el(
       'summary',
       null,
-      file.locked ? `🔒 ${file.path} · locked` : file.path,
+      file.locked ? `${file.path} · locked` : file.path,
     );
     const content = String(file.content || '');
     const lines = content.split('\n');
@@ -341,15 +344,33 @@ function planCard(item) {
 
 function liveCard(item, opts = {}) {
   const task = taskById(item.taskId);
-  const card = el('div', `live-card role-${item.role}`);
+  const active = isInFlight(task);
+  const state = active ? 'running' : (task?.status ?? 'queued');
+  const card = el('div', `live-card role-${item.role} state-${state}`);
   card.dataset.taskId = item.taskId ?? '';
   const head = el('div', 'live-head');
   head.append(identity(item, item.provider));
-  if (task?.currentIteration > 1 || (task && task.maxIterations > 1)) {
+  if (opts.parallel && task) {
     head.append(
       badge(
-        task.currentIteration > 1 ? 'attempt warn' : 'attempt',
-        `attempt ${task.currentIteration || 1} of ${task.maxIterations}`,
+        task.status === 'succeeded'
+          ? 'lane-status complete'
+          : task.status === 'failed'
+            ? 'lane-status failed'
+            : 'lane-status running',
+        task.status === 'succeeded'
+          ? 'Complete'
+          : task.status === 'failed'
+            ? 'Blocked'
+            : 'Working',
+      ),
+    );
+  }
+  if (task?.currentIteration > 1) {
+    head.append(
+      badge(
+        'attempt warn',
+        `Recovery pass ${task.currentIteration - 1}`,
       ),
     );
   }
@@ -357,9 +378,16 @@ function liveCard(item, opts = {}) {
   card.append(el('h3', 'live-title', item.title ?? 'Working'));
   if (item.body && !opts.compact) card.append(el('p', 'sub', item.body));
   if (task?.steps) card.append(stepTracker(task.steps));
-  card.append(activityFeed(task, opts.compact ? 4 : 6));
-  const meter = timeoutMeter(task);
-  if (meter) card.append(meter);
+  if (active) {
+    card.append(activityFeed(task, opts.compact ? 4 : 6));
+    const meter = timeoutMeter(task);
+    if (meter) card.append(meter);
+  } else if (task?.status === 'failed') {
+    card.append(el('p', 'lane-result failed', task.lastError || 'This lane needs attention.'));
+  } else {
+    const latest = task?.timeline?.at(-1);
+    card.append(el('p', 'lane-result', latest?.title ?? 'Work complete'));
+  }
   return card;
 }
 
@@ -381,7 +409,7 @@ function plannerCard(item) {
         'p',
         'activity-idle',
         planner
-          ? `Planning · ${Math.floor(Math.max(0, serverNow() - planner.startedAt) / 1000)}s / ${Math.round(CLI_TIMEOUT_MS / 1000)}s`
+          ? `Planning · ${formatElapsed(Math.max(0, serverNow() - planner.startedAt))} elapsed`
           : 'Planning…',
       ),
     );
@@ -432,7 +460,7 @@ function renderItem(item) {
   if (item.kind === 'freeze') {
     li.classList.add('freeze');
     const head = el('div', 'identity');
-    head.append(el('span', 'lock', '🔒'));
+    head.append(el('span', 'lock', '◆'));
     head.append(el('span', 'role-label', 'Oracle frozen'));
     if (Number.isFinite(item.ts)) head.append(el('time', 'stamp', formatClock(item.ts)));
     li.append(head);
@@ -443,13 +471,14 @@ function renderItem(item) {
 
   if (item.kind === 'race') {
     li.classList.add('race');
-    li.append(el('h3', 'race-title', item.title ?? 'Two processes, two worktrees'));
+    li.append(el('h3', 'race-title', item.title ?? 'Building in parallel'));
     li.append(el('p', 'sub', item.body ?? ''));
     const columns = el('div', 'race-cols');
     for (const taskId of item.taskIds ?? []) {
       const task = taskById(taskId);
       if (!task) continue;
       const role = task.jobKind === 'tests' ? 'tests' : 'writer';
+      const complete = task.status === 'succeeded';
       columns.append(
         liveCard(
           {
@@ -458,15 +487,18 @@ function renderItem(item) {
             role,
             provider: task.provider,
             who: role === 'tests' ? 'Test author' : 'Implementer',
-            title: role === 'tests' ? 'Authoring tests' : 'Implementing',
+            title:
+              role === 'tests'
+                ? complete ? 'Tests ready' : 'Writing tests'
+                : complete ? 'Implementation ready' : 'Implementing code',
             body: task.title,
           },
-          { compact: true },
+          { compact: true, parallel: true },
         ),
       );
     }
     li.append(columns);
-    li.append(el('p', 'race-merge', '↓ both branches converge before the tests can freeze'));
+    li.append(el('p', 'race-merge', 'Independent worktrees · merged only after both lanes complete'));
     return li;
   }
 
@@ -594,9 +626,7 @@ function renderSlots(slots) {
   els.slots.replaceChildren();
   for (const slot of slots ?? []) {
     const li = el('li', `slot ${slot.provider} ${slot.isBusy ? 'busy' : 'idle'}`);
-    const avatar = el('span', `avatar ${slot.provider}`, PROVIDER_LABEL[slot.provider][0]);
-    avatar.setAttribute('aria-hidden', 'true');
-    li.append(avatar);
+    li.append(providerAvatar(slot.provider));
     li.append(el('span', 'slot-name', PROVIDER_LABEL[slot.provider]));
     li.append(
       el(
@@ -658,7 +688,7 @@ function renderHeader(project, task) {
       const locked = (project.oraclePaths ?? []).join(', ');
       const frozen = Boolean(project.frozenAt) && locked;
       els.oracleChip.textContent = frozen
-        ? `🔒 Locked · ${locked}`
+        ? `Locked · ${locked}`
         : 'Tests not frozen yet';
       els.oracleChip.classList.toggle('open', !frozen);
       els.oracleChip.classList.toggle('just-locked', Boolean(frozen));
@@ -715,12 +745,12 @@ function updateActions() {
       ? running
         ? 'Steer the run — it lands in the thread now and applies at the next step.'
         : 'Steer the orchestrator: change the approach, drop a step, tighten the contract.'
-      : 'What should we build? Tests and implementation run as separate processes — send again mid-run to steer.';
+      : 'Describe what you want to build…';
   }
   if (els.composerHint) {
     els.composerHint.textContent = running
       ? 'Sending now queues the steer — it applies at the next loop boundary.'
-      : 'Tests freeze before a SHA. Coding agents never run git commit.';
+      : 'Tests freeze before a SHA · commits are owned by Choreo';
   }
 }
 
@@ -752,7 +782,7 @@ function renderSettingsSummary() {
     `tests: ${author ? PROVIDER_LABEL[author] : (PROVIDER_LABEL[writer] ?? '—')}`,
     `code: ${PROVIDER_LABEL[writer] ?? '—'}`,
     `review: ${reviewer ? PROVIDER_LABEL[reviewer] : 'tests only'}`,
-    `attempts: ${els.maxIterations?.value ?? 2}`,
+    `recovery cap: ${els.maxIterations?.value ?? 5} passes`,
   ];
   els.settingsSummary.textContent = parts.join(' · ');
 }
@@ -907,7 +937,7 @@ async function resetAll() {
 }
 
 async function createProject(goal) {
-  const attempts = Number.parseInt(els.maxIterations?.value ?? '2', 10);
+  const attempts = Number.parseInt(els.maxIterations?.value ?? '5', 10);
   const res = await fetch(`${API}/api/projects`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -916,7 +946,7 @@ async function createProject(goal) {
       goal,
       ...(els.sourceDir.value.trim() ? { sourceDir: els.sourceDir.value.trim() } : {}),
       writerProvider: els.provider.value,
-      maxIterations: Number.isFinite(attempts) && attempts > 0 ? attempts : 2,
+      maxIterations: Number.isFinite(attempts) && attempts > 0 ? attempts : 5,
       testCommand: ['node', '--test'],
       ...(els.reviewerProvider?.value
         ? { reviewerProvider: els.reviewerProvider.value }
@@ -963,7 +993,7 @@ els.composer.addEventListener('submit', async (event) => {
   } catch {
     els.prompt.value = text;
     setUnreachable(true);
-    setFormError('Can’t reach LoopSync on :4055');
+    setFormError('Can’t reach Choreo on :4055');
   }
 });
 

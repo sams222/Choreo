@@ -68,7 +68,7 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
 3. `fs.cpSync(fixtureDir, dir, { recursive: true })`  
 4. `git init` if no `.git`  
 5. `git checkout -b loopsync/${taskId}`  
-6. `user.email=loopsync@local`, `user.name=LoopSync`, `commit.gpgsign false`  
+6. `user.email=choreo@local`, `user.name=Choreo`, `commit.gpgsign false`
 7. Require `parse.js` + `parse.test.js`
 
 ### Step 3 — `runTests`

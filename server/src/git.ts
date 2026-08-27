@@ -57,8 +57,8 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     if (!hadGit) {
       await runGit(dir, ['init']);
     }
-    await runGit(dir, ['config', 'user.email', 'loopsync@local']);
-    await runGit(dir, ['config', 'user.name', 'LoopSync']);
+    await runGit(dir, ['config', 'user.email', 'choreo@local']);
+    await runGit(dir, ['config', 'user.name', 'Choreo']);
     await runGit(dir, ['config', 'commit.gpgsign', 'false']);
     if (!hadGit) {
       if (empty || persistDir || ctx?.sourceDir) {

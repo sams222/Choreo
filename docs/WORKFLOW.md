@@ -1,4 +1,4 @@
-# LoopSync — workflow (user → API → orchestration)
+# Choreo — workflow (user → API → orchestration)
 
 One Node process on **`:4055`**. The browser (or curl) never talks to git or to Claude/Codex. It only hits four JSON endpoints. The orchestrator owns workspaces, tests, and commits.
 

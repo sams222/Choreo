@@ -6,7 +6,7 @@
 
 **Does not write:** `fixture/parse.test.js`, Gemini, FakeAdapter, recursive subagent trees, jobs-file finder, LLM dispatcher, test-author LLM.
 
-**Do not:** rename JSON keys; let review authorize commit on red tests; `shell: true`; commit in original `fixture/`; parallel writer+reviewer; spawn LoopSync from a CLI; start this playbook if Launch still queue-only.
+**Do not:** rename JSON keys; let review authorize commit on red tests; `shell: true`; commit in original `fixture/`; parallel writer+reviewer; spawn Choreo from a CLI; start this playbook if Launch still queue-only.
 
 ---
 
@@ -108,4 +108,4 @@ Do **not** implement: jobs-file finder, LLM dispatcher, recursive spawn, test-au
 
 ## Done
 
-Kernel Launch still works. Oracle cannot be rewritten for a fake SHA. Reviewer is a separate process. Tests remain the only veto. Caps fire before extra spawns. No recursive LoopSync spawn.
+Kernel Launch still works. Oracle cannot be rewritten for a fake SHA. Reviewer is a separate process. Tests remain the only veto. Caps fire before extra spawns. No recursive Choreo spawn.

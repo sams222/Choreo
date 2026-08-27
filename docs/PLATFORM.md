@@ -1,4 +1,4 @@
-# LoopSync — full orchestration platform
+# Choreo — full orchestration platform
 
 Sequel to [`PHASE_C.md`](PHASE_C.md). Kernel (one `runLoop`, locked oracle, writer ≠ reviewer, Node starts every spawn) **stays**. This file is how we grow from “one homework job” to “plan and run a whole project.”
 
@@ -30,20 +30,20 @@ That is the right inner mechanism. It is not a product for entire projects. Toda
 
 Steal these four ideas:
 
-| Manus | LoopSync equivalent |
+| Manus | Choreo equivalent |
 |---|---|
 | Goal, not a single prompt against a toy file | **Project**: repo path + goal + oracle that belongs to *this* job |
 | Orchestrator writes a live task list | **Plan object** the human can edit before workers run |
 | Sub-agents in a sandbox | Already: copy-on-write workspace + Claude/Codex processes |
 | Finished files, not chat | **Code pane + artifact index** (started); make it the product |
 
-Do **not** steal in the next phases: a proprietary cloud VM fleet, a browser operator, email/Slack inboxes, “hundreds of agents,” or a second orchestrator that bypasses `runLoop`. LoopSync’s edge vs Manus is local CLIs, a **tamper-proof oracle**, and split-context review (the [Bun-in-Rust](https://bun.com/blog/bun-in-rust) lesson). Keep that.
+Do **not** steal in the next phases: a proprietary cloud VM fleet, a browser operator, email/Slack inboxes, “hundreds of agents,” or a second orchestrator that bypasses `runLoop`. Choreo’s edge vs Manus is local CLIs, a **tamper-proof oracle**, and split-context review (the [Bun-in-Rust](https://bun.com/blog/bun-in-rust) lesson). Keep that.
 
 ---
 
 ## North star
 
-A user opens LoopSync, points it at a folder (or an empty project), types a goal, picks who plans / writes / reviews, and optionally writes or generates **tests for that goal**. LoopSync:
+A user opens Choreo, points it at a folder (or an empty project), types a goal, picks who plans / writes / reviews, and optionally writes or generates **tests for that goal**. Choreo:
 
 1. Produces a plan as a list of **work items** (not a paragraph).
 2. Lets the human **keep talking** to the orchestrator: amend the goal, drop an item, “use binary search instead,” “stop on item 3.”
@@ -85,7 +85,7 @@ flowchart TB
 
 ## Hard rules (do not drop)
 
-1. **Node owns spawn.** A CLI must not start another LoopSync loop. Scheduler may enqueue; it may not copy `git.ts`.
+1. **Node owns spawn.** A CLI must not start another Choreo loop. Scheduler may enqueue; it may not copy `git.ts`.
 2. **Oracle is per project**, not global `parse.test.js`. Models cannot edit locked test paths.
 3. **Writer and reviewer are different processes.** Same binary allowed; same context window not allowed.
 4. **Tests veto the SHA.** Review cannot approve red tests.
@@ -127,7 +127,7 @@ Each phase has a gate. Do not start the next until the gate is true. UI polish c
 - Planner must emit a machine-readable plan (JSON in `protocol/examples/plan.v1.json`): ordered `items[]` with `title`, `files[]`, `doneWhen`.
 - Human sees a checklist. Can delete, reorder, or freeze an item before Run.
 - **Composer stays open for the life of the project.** `POST /api/projects/:id/messages` `{ role: "user", text }`.
-- Orchestrator (LoopSync + optional planner CLI, **new process per message**, not `codex exec resume`) returns `{ reply, planPatch }`. Node applies the patch: add/cancel/reopen items, update prompts.
+- Orchestrator (Choreo + optional planner CLI, **new process per message**, not `codex exec resume`) returns `{ reply, planPatch }`. Node applies the patch: add/cancel/reopen items, update prompts.
 - If the user is talking about an item that already ran, scheduler enqueues a **new** `runLoop` for that item (retry with the new instruction + last oracle/review text). Workspace is the project copy; writer still cannot commit.
 - Scheduler runs **one item at a time** through `runLoop` unless Phase G says two items are independent.
 - Item prompt = original goal + this item + **thread summary** + already-shipped files.

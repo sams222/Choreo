@@ -1,8 +1,8 @@
-# LoopSync
+# Choreo
 
-[github.com/sams222/LoopSync](https://github.com/sams222/LoopSync) — local orchestration for coding CLIs.
+[github.com/sams222/LoopSync](https://github.com/sams222/LoopSync) — Choreo, local orchestration for coding CLIs.
 
-State a **goal**. LoopSync splits the work into **tests** and **implementation** (different processes, different context). When Plan and Write are different CLIs, those items run in parallel worktrees and merge. Tests freeze before a SHA is allowed. Coding agents never `git commit`.
+State a **goal**. Choreo splits the work into **tests** and **implementation** (different processes, different context). When Plan and Write are different CLIs, those items run in parallel worktrees and merge. Tests freeze before a SHA is allowed. Coding agents never `git commit`.
 
 Point at an existing folder if you already have a tree. Leave the folder blank to start empty. There is no canned homework test in the default UI.
 
@@ -65,6 +65,7 @@ with no CLIs involved — useful when the live tools or the wifi are unreliable.
 | --- | --- |
 | `LOOPSYNC_PLAIN_CLI=1` | Fall back to the old `--output-format text` argv if a CLI's JSON stream misbehaves |
 | `LOOPSYNC_WORKSPACE_ROOT` | Move the worktree root off `/tmp/loopsync-workspaces` |
+| `LOOPSYNC_CLI_TIMEOUT_MS` | Override the 30-minute per-process runtime limit (minimum 60,000 ms) |
 
 ## Layout
 

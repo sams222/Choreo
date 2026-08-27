@@ -484,7 +484,7 @@ export function createHttpApp(deps: {
       await git.createWorkspace(`merge_${project.id}`, ctx);
       const commit = await git.commitIfDirty(
         project.workspaceDir,
-        `LoopSync: ${project.title}`,
+        `Choreo: ${project.title}`,
         ctx,
       );
       if (commit) {

@@ -350,10 +350,11 @@ async function executeLoop(opts: {
       try {
         const commit = await git.commitIfDirty(
           workspaceDir,
-          `LoopSync tests: ${title}`,
+          `Choreo tests: ${title}`,
           ctx,
         );
-        if (initial.projectId) {
+        const parallelShard = Boolean(store.getProject()?.shards);
+        if (initial.projectId && !parallelShard) {
           // §4 — the freeze is a beat in the thread, not a silent field change.
           store.updateProject({ oraclePaths: testFiles, frozenAt: monotonicNow() });
         }
@@ -364,10 +365,14 @@ async function executeLoop(opts: {
         setStep(store, taskId, 'git', 'ok');
         pushTimeline(store, taskId, {
           role: 'git',
-          title: commit
-            ? `Froze the tests at ${commit.sha.slice(0, 7)}`
-            : 'Froze the tests',
-          body: `${testFiles.join(', ')} are now the oracle. Coding agents never run git commit.`,
+          title: parallelShard
+            ? 'Test branch ready'
+            : commit
+              ? `Froze the tests at ${commit.sha.slice(0, 7)}`
+              : 'Froze the tests',
+          body: parallelShard
+            ? `${testFiles.join(', ')} are ready and waiting for the implementation branch.`
+            : `${testFiles.join(', ')} are now the oracle. Coding agents never run git commit.`,
           attempt,
           tone: 'ok',
         });
@@ -566,7 +571,7 @@ async function executeLoop(opts: {
     try {
       const commit = await git.commitIfDirty(
         workspaceDir,
-        `LoopSync: ${title}`,
+        `Choreo: ${title}`,
         ctx,
       );
       if (!commit) {
