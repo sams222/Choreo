@@ -1,16 +1,25 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  AgentEvent,
   ChatMessage,
   DashboardDefaults,
   LaunchTaskBody,
   PlanItem,
   PlanObject,
+  PlanCard,
+  PlannerState,
   ProjectState,
   ProviderType,
   ServerSnapshot,
   TaskState,
 } from '../../protocol/index.ts';
-import { DEFAULT_MAX_ITERATIONS, inferJobKind } from '../../protocol/index.ts';
+import {
+  DEFAULT_MAX_ITERATIONS,
+  MAX_AGENT_EVENTS,
+  diffPlans,
+  inferJobKind,
+  monotonicNow,
+} from '../../protocol/index.ts';
 
 const MAX_LOGS = 500;
 
@@ -24,6 +33,8 @@ function cloneTask(task: TaskState): TaskState {
     ...task,
     logs: [...task.logs],
     steps: task.steps?.map((step) => ({ ...step })),
+    events: task.events?.map((event) => ({ ...event })),
+    usage: task.usage ? { ...task.usage } : undefined,
     timeline: task.timeline?.map((item) => ({ ...item })),
     outputFiles: task.outputFiles?.map((file) => ({ ...file })),
     oraclePaths: task.oraclePaths ? [...task.oraclePaths] : undefined,
@@ -38,6 +49,19 @@ function cloneProject(project: ProjectState): ProjectState {
     oraclePaths: [...project.oraclePaths],
     messages: project.messages.map((message) => ({ ...message })),
     plan: project.plan.map((item) => ({ ...item, files: [...item.files] })),
+    steering: project.steering?.map((message) => ({ ...message })),
+    planner: project.planner
+      ? {
+          ...project.planner,
+          events: project.planner.events.map((event) => ({ ...event })),
+        }
+      : undefined,
+    planDelta: project.planDelta ? { ...project.planDelta } : undefined,
+    planCards: project.planCards?.map((card) => ({
+      ...card,
+      items: card.items.map((item) => ({ ...item, files: [...item.files] })),
+      delta: card.delta ? { ...card.delta } : undefined,
+    })),
   };
 }
 
@@ -68,6 +92,12 @@ export function createStore(defaults?: DashboardDefaults) {
   let tasks: TaskState[] = [];
   let slots: ServerSnapshot['slots'] = IDLE_SLOTS.map((slot) => ({ ...slot }));
   let project: ProjectState | undefined;
+  let rev = 0;
+
+  function bump(): number {
+    rev += 1;
+    return rev;
+  }
 
   return {
     getSnapshot(): ServerSnapshot {
@@ -76,7 +106,13 @@ export function createStore(defaults?: DashboardDefaults) {
         slots: slots.map((slot) => ({ ...slot })),
         project: project ? cloneProject(project) : undefined,
         defaults,
+        rev,
+        now: Date.now(),
       };
+    },
+
+    getRev(): number {
+      return rev;
     },
 
     addTask(body: LaunchTaskBody): TaskState {
@@ -114,6 +150,7 @@ export function createStore(defaults?: DashboardDefaults) {
         empty: body.empty,
       };
       tasks = [...tasks, task];
+      bump();
       return cloneTask(task);
     },
 
@@ -153,6 +190,7 @@ export function createStore(defaults?: DashboardDefaults) {
             : undefined,
       };
       tasks = tasks.map((item, i) => (i === index ? next : item));
+      bump();
       return cloneTask(next);
     },
 
@@ -160,10 +198,31 @@ export function createStore(defaults?: DashboardDefaults) {
       slots = slots.map((slot) =>
         slot.provider === provider ? { ...slot, isBusy } : slot,
       );
+      bump();
+    },
+
+    /** P0.1 — append structured CLI activity, newest last, capped. */
+    appendTaskEvents(id: string, incoming: AgentEvent[]): void {
+      if (incoming.length === 0) {
+        return;
+      }
+      const index = tasks.findIndex((item) => item.id === id);
+      if (index === -1) {
+        return;
+      }
+      const current = tasks[index];
+      const merged = [...(current.events ?? []), ...incoming];
+      const events =
+        merged.length > MAX_AGENT_EVENTS
+          ? merged.slice(-MAX_AGENT_EVENTS)
+          : merged;
+      tasks = tasks.map((item, i) => (i === index ? { ...item, events } : item));
+      bump();
     },
 
     setProject(next: ProjectState): ProjectState {
       project = cloneProject(next);
+      bump();
       return cloneProject(project);
     },
 
@@ -190,13 +249,114 @@ export function createStore(defaults?: DashboardDefaults) {
         plan: patch.plan
           ? patch.plan.map((item) => ({ ...item, files: [...item.files] }))
           : project.plan.map((item) => ({ ...item, files: [...item.files] })),
-        shards: patch.shards
-          ? { ...patch.shards }
-          : project.shards
-            ? { ...project.shards }
-            : undefined,
+        shards:
+          'shards' in patch
+            ? patch.shards
+              ? { ...patch.shards }
+              : undefined
+            : project.shards
+              ? { ...project.shards }
+              : undefined,
       });
+      bump();
       return cloneProject(project);
+    },
+
+    /** P1.6 — the orchestrator's own run, streamed instead of discarded. */
+    setPlanner(next: PlannerState | undefined): void {
+      if (!project) {
+        return;
+      }
+      project = cloneProject({ ...project, planner: next });
+      bump();
+    },
+
+    appendPlannerEvents(incoming: AgentEvent[], text: string): void {
+      if (!project?.planner) {
+        return;
+      }
+      const merged = [...project.planner.events, ...incoming];
+      const events =
+        merged.length > MAX_AGENT_EVENTS
+          ? merged.slice(-MAX_AGENT_EVENTS)
+          : merged;
+      project = cloneProject({
+        ...project,
+        planner: {
+          ...project.planner,
+          events,
+          text: `${project.planner.text}${text}`.slice(-4000),
+        },
+      });
+      bump();
+    },
+
+    /** §3 — steering accepted mid-run, applied at the next loop boundary. */
+    queueSteering(text: string): ChatMessage | undefined {
+      if (!project) {
+        return undefined;
+      }
+      const message: ChatMessage = {
+        id: newMessageId(),
+        role: 'user',
+        text,
+        ts: monotonicNow(),
+        pending: true,
+      };
+      project = cloneProject({
+        ...project,
+        messages: [...project.messages, message],
+        steering: [...(project.steering ?? []), message],
+      });
+      bump();
+      return { ...message };
+    },
+
+    /** Drain the queue and mark the drained messages applied. */
+    takeSteering(): string[] {
+      if (!project) {
+        return [];
+      }
+      const queued = (project.steering ?? []).filter(
+        (message) => !message.cancelled,
+      );
+      if (queued.length === 0) {
+        return [];
+      }
+      const appliedAt = Date.now();
+      const ids = new Set(queued.map((message) => message.id));
+      project = cloneProject({
+        ...project,
+        steering: [],
+        messages: project.messages.map((message) =>
+          ids.has(message.id)
+            ? { ...message, pending: false, appliedAt }
+            : message,
+        ),
+      });
+      bump();
+      return queued.map((message) => message.text);
+    },
+
+    cancelSteering(messageId: string): boolean {
+      if (!project) {
+        return false;
+      }
+      const queued = project.steering ?? [];
+      if (!queued.some((message) => message.id === messageId)) {
+        return false;
+      }
+      project = cloneProject({
+        ...project,
+        steering: queued.filter((message) => message.id !== messageId),
+        messages: project.messages.map((message) =>
+          message.id === messageId
+            ? { ...message, pending: false, cancelled: true }
+            : message,
+        ),
+      });
+      bump();
+      return true;
     },
 
     addMessage(
@@ -210,33 +370,68 @@ export function createStore(defaults?: DashboardDefaults) {
         id: newMessageId(),
         role,
         text,
-        ts: Date.now(),
+        ts: monotonicNow(),
       };
       project = cloneProject({
         ...project,
         messages: [...project.messages, message],
       });
+      bump();
       return { ...message };
     },
 
     applyPlanObject(
       parsed: PlanObject,
       runningTaskId: string,
+      note?: string,
     ): PlanItem[] | undefined {
       if (!project) {
         return undefined;
       }
-      const items: PlanItem[] = parsed.items.map((item, index) => ({
-        id: newItemId(),
-        title: item.title,
-        prompt: item.prompt?.trim() || item.title,
-        files: [...(item.files ?? [])],
-        doneWhen: item.doneWhen,
-        status: index === 0 && runningTaskId ? 'running' : 'pending',
-        taskId: index === 0 && runningTaskId ? runningTaskId : undefined,
-        kind: inferJobKind(item),
-      }));
-      project = cloneProject({ ...project, plan: items });
+      const previous = project.plan;
+      const items: PlanItem[] = parsed.items.map((item, index) => {
+        // A replan must not un-freeze work that already landed: an item whose
+        // title matches a finished one keeps its status and its task.
+        const done = previous.find(
+          (prev) => prev.title === item.title && prev.status === 'succeeded',
+        );
+        return {
+          id: done?.id ?? newItemId(),
+          title: item.title,
+          prompt: item.prompt?.trim() || item.title,
+          files: [...(item.files ?? [])],
+          doneWhen: item.doneWhen,
+          status: done
+            ? 'succeeded'
+            : index === 0 && runningTaskId
+              ? 'running'
+              : 'pending',
+          taskId: done?.taskId ?? (index === 0 && runningTaskId ? runningTaskId : undefined),
+          kind: inferJobKind(item),
+        };
+      });
+      const delta = diffPlans(previous, items);
+      const changed =
+        previous.length === 0 ||
+        delta.added.length > 0 ||
+        delta.removed.length > 0 ||
+        delta.changed.length > 0;
+      const card: PlanCard = {
+        id: `plan_${(project.planCards?.length ?? 0) + 1}`,
+        ts: monotonicNow(),
+        items: items.map((item) => ({ ...item, files: [...item.files] })),
+        delta: previous.length === 0 ? undefined : delta,
+        note,
+      };
+      project = cloneProject({
+        ...project,
+        plan: items,
+        planDelta: previous.length === 0 ? undefined : delta,
+        planCards: changed
+          ? [...(project.planCards ?? []), card]
+          : (project.planCards ?? []),
+      });
+      bump();
       return cloneProject(project).plan;
     },
 
@@ -253,6 +448,7 @@ export function createStore(defaults?: DashboardDefaults) {
           : { ...item, files: [...item.files] },
       );
       project = cloneProject({ ...project, plan: items });
+      bump();
       return items.find((item) => item.id === itemId);
     },
 
@@ -267,6 +463,7 @@ export function createStore(defaults?: DashboardDefaults) {
         item.taskId === taskId ? { ...item, status } : item,
       );
       project = cloneProject({ ...project, plan: items, activeTaskId: taskId });
+      bump();
     },
 
     newProjectId,
@@ -277,6 +474,7 @@ export function createStore(defaults?: DashboardDefaults) {
       tasks = [];
       slots = IDLE_SLOTS.map((slot) => ({ ...slot }));
       project = undefined;
+      bump();
     },
   };
 }

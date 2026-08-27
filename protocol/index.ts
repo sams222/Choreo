@@ -21,9 +21,85 @@ export type StepStatus = 'pending' | 'running' | 'ok' | 'fail' | 'skipped';
 export interface StepState {
   id: StepId;
   status: StepStatus;
+  startedAt?: number;
+  endedAt?: number;
+  durationMs?: number;
 }
 
+export const STEP_LABEL: Record<StepId, string> = {
+  writer: 'write',
+  tests: 'tests',
+  review: 'review',
+  git: 'git',
+};
+
 export type ReviewVerdict = 'ok' | 'reject';
+
+export type AgentRole = 'plan' | 'writer' | 'tests' | 'review' | 'git' | 'loop';
+
+/** Structured activity parsed out of a CLI's JSON event stream. */
+export type AgentEventKind =
+  | 'start'
+  | 'text'
+  | 'reasoning'
+  | 'tool'
+  | 'result'
+  | 'error';
+
+export interface AgentEvent {
+  id: string;
+  ts: number;
+  provider: ProviderType;
+  role: AgentRole;
+  kind: AgentEventKind;
+  /** Prose for text/reasoning, a short summary for tool/result. */
+  text: string;
+  /** Edit / Read / Bash / apply_patch … */
+  tool?: string;
+  /** File path or command the tool acted on. */
+  target?: string;
+  /** Present on `result` events when the CLI reports them. */
+  durationMs?: number;
+  costUsd?: number;
+  numTurns?: number;
+  isError?: boolean;
+}
+
+export interface AgentUsage {
+  durationMs?: number;
+  costUsd?: number;
+  numTurns?: number;
+}
+
+export const ROLE_LABEL: Record<AgentRole, string> = {
+  plan: 'Orchestrator',
+  writer: 'Implementer',
+  tests: 'Test author',
+  review: 'Reviewer',
+  git: 'Git (Node-owned)',
+  loop: 'LoopSync',
+};
+
+export const PROVIDER_LABEL: Record<ProviderType, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+};
+
+/** Max structured events kept per task. */
+export const MAX_AGENT_EVENTS = 120;
+
+let lastStamp = 0;
+
+/**
+ * Thread order is timestamp order, and several events are created inside the
+ * same millisecond. This never returns the same value twice, so two beats can
+ * never tie and fall back to comparing ids.
+ */
+export function monotonicNow(): number {
+  const now = Date.now();
+  lastStamp = now > lastStamp ? now : lastStamp + 1;
+  return lastStamp;
+}
 
 export interface TaskState {
   id: string;
@@ -59,13 +135,31 @@ export interface TaskState {
   skipTests?: boolean;
   skipCommit?: boolean;
   empty?: boolean;
+  /** Structured CLI activity (P0.1). Newest last, capped. */
+  events?: AgentEvent[];
+  /** Wall clock for the server-authoritative elapsed readout. */
+  startedAt?: number;
+  endedAt?: number;
+  /** The CLI process hit CLI_TIMEOUT_MS instead of exiting on its own. */
+  timedOut?: boolean;
+  /** Aggregated duration/cost/turns reported by the CLIs. */
+  usage?: AgentUsage;
+  /** Which plan item this task is executing. */
+  planItemId?: string;
 }
 
 export interface TimelineEvent {
   id: string;
-  role: 'plan' | 'writer' | 'tests' | 'review' | 'git' | 'loop';
+  role: AgentRole;
   title: string;
   body: string;
+  ts?: number;
+  provider?: ProviderType;
+  attempt?: number;
+  verdict?: ReviewVerdict;
+  durationMs?: number;
+  tone?: 'ok' | 'fail' | 'info';
+  timedOut?: boolean;
 }
 
 export interface OutputFile {
@@ -86,11 +180,61 @@ export interface ServerSnapshot {
   /** Phase D/E: at most one live project in RAM. */
   project?: ProjectState;
   defaults?: DashboardDefaults;
+  /** Bumped on every mutation so SSE and polling can skip no-op frames. */
+  rev?: number;
+  /** Server time when the snapshot was taken (authoritative elapsed). */
+  now?: number;
+  /** Server-assembled chronological thread. The client renders, not rebuilds. */
+  thread?: ThreadItem[];
+}
+
+export type ThreadItemKind =
+  | 'user'
+  | 'orchestrator'
+  | 'plan'
+  | 'event'
+  | 'live'
+  | 'race'
+  | 'merge'
+  | 'freeze'
+  | 'commit';
+
+export interface ThreadItem {
+  id: string;
+  ts: number;
+  kind: ThreadItemKind;
+  role: AgentRole | 'user';
+  who: string;
+  provider?: ProviderType;
+  title?: string;
+  body?: string;
+  taskId?: string;
+  /** Two task ids for the parallel race card. */
+  taskIds?: string[];
+  plan?: PlanItem[];
+  planDelta?: PlanDelta;
+  steps?: StepState[];
+  files?: OutputFile[];
+  verdict?: ReviewVerdict;
+  attempt?: number;
+  maxAttempts?: number;
+  sha?: string;
+  diff?: string;
+  durationMs?: number;
+  usage?: AgentUsage;
+  pending?: boolean;
+  cancelled?: boolean;
+  timedOut?: boolean;
+  tone?: 'ok' | 'fail' | 'info';
 }
 
 export interface RunResult {
   output: string;
   exitCode: number;
+  /** Killed by CLI_TIMEOUT_MS rather than exiting on its own. */
+  timedOut?: boolean;
+  events?: AgentEvent[];
+  usage?: AgentUsage;
 }
 
 export interface TestResult {
@@ -117,6 +261,7 @@ export interface CLIAdapter {
     prompt: string,
     onLog: (text: string) => void,
     signal: AbortSignal,
+    onEvent?: (event: AgentEvent) => void,
   ): Promise<RunResult>;
 }
 
@@ -143,6 +288,12 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   ts: number;
+  /** Steering accepted mid-run; applies at the next loop boundary. */
+  pending?: boolean;
+  /** Set when a pending steering message was folded into a prompt. */
+  appliedAt?: number;
+  /** Set when the user cancelled a queued steering message. */
+  cancelled?: boolean;
 }
 
 export type PlanItemStatus = 'pending' | 'running' | 'succeeded' | 'failed';
@@ -156,6 +307,47 @@ export interface PlanItem {
   status: PlanItemStatus;
   taskId?: string;
   kind?: JobKind;
+}
+
+/** One immutable plan snapshot, posted into the thread as a card (§3). */
+export interface PlanCard {
+  id: string;
+  ts: number;
+  items: PlanItem[];
+  delta?: PlanDelta;
+  /** Short note describing why the plan changed. */
+  note?: string;
+}
+
+export interface PlanDelta {
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+
+export function diffPlans(
+  before: readonly PlanItem[],
+  after: readonly PlanItem[],
+): PlanDelta {
+  const beforeTitles = before.map((item) => item.title);
+  const afterTitles = after.map((item) => item.title);
+  const added = afterTitles.filter((title) => !beforeTitles.includes(title));
+  const removed = beforeTitles.filter((title) => !afterTitles.includes(title));
+  const changed: string[] = [];
+  for (const item of after) {
+    const match = before.find((prev) => prev.title === item.title);
+    if (!match) {
+      continue;
+    }
+    if (
+      match.prompt !== item.prompt ||
+      match.doneWhen !== item.doneWhen ||
+      match.files.join(',') !== item.files.join(',')
+    ) {
+      changed.push(item.title);
+    }
+  }
+  return { added, removed, changed };
 }
 
 export interface ProjectState {
@@ -174,6 +366,29 @@ export interface ProjectState {
   plan: PlanItem[];
   activeTaskId?: string;
   shards?: { testsDir: string; codeDir: string };
+  createdAt?: number;
+  /** Live orchestrator run (planning or steering) with streamed output. */
+  planner?: PlannerState;
+  /** Steering the user sent mid-run, applied at the next loop boundary. */
+  steering?: ChatMessage[];
+  /** Set once the test oracle froze; drives the freeze beat in the thread. */
+  frozenAt?: number;
+  /** Latest plan change from a replan, for the delta card. */
+  planDelta?: PlanDelta;
+  /** Plan history — one card per (re)plan, newest last. */
+  planCards?: PlanCard[];
+}
+
+export type PlannerPhase = 'idle' | 'planning' | 'steering' | 'done' | 'failed';
+
+export interface PlannerState {
+  phase: PlannerPhase;
+  provider?: ProviderType;
+  startedAt: number;
+  endedAt?: number;
+  events: AgentEvent[];
+  text: string;
+  error?: string;
 }
 
 export interface DashboardDefaults {
@@ -265,7 +480,11 @@ export interface PostMessageBody {
 
 export interface PostMessageResponse {
   ok: true;
+  /** Empty when the message was queued instead of starting a run. */
   taskId: string;
+  /** §3 — accepted mid-run; applies at the next loop boundary. */
+  queued?: boolean;
+  messageId?: string;
 }
 
 export interface LaunchTaskResponse {
@@ -275,6 +494,8 @@ export interface LaunchTaskResponse {
 export interface OkResponse {
   ok: true;
 }
+
+export const REPLAY_LOG = 'data/loopsync-thread.jsonl';
 
 export type ErrorCode =
   | 'BAD_REQUEST'
@@ -298,6 +519,15 @@ export const POLL_MS = 300;
 export const CLI_TIMEOUT_MS = 120_000;
 export const DEFAULT_MAX_ITERATIONS = 2;
 export const WORKSPACE_ROOT = '/tmp/loopsync-workspaces';
+
+/**
+ * Where isolated worktrees live. Overridable so two LoopSync instances (or two
+ * test files) never reset each other's trees out from under a running loop.
+ */
+export function workspaceRoot(): string {
+  const override = process.env.LOOPSYNC_WORKSPACE_ROOT;
+  return override && override.trim() !== '' ? override.trim() : WORKSPACE_ROOT;
+}
 export const ORACLE_PATHS = ['parse.test.js'] as const;
 export const SQRT_ORACLE_PATHS = ['sqrt.test.js'] as const;
 export const DEFAULT_TEST_COMMAND = ['node', '--test'] as const;
@@ -324,17 +554,51 @@ export const DEFAULT_SQRT: Pick<
 
 export const HTTP = {
   getState: 'GET /api/state',
+  events: 'GET /api/events',
+  replay: 'GET /api/replay',
   launch: 'POST /api/tasks',
   cancel: 'POST /api/tasks/:id/cancel',
   reset: 'POST /api/reset',
   createProject: 'POST /api/projects',
   projectMessage: 'POST /api/projects/:id/messages',
+  cancelSteering: 'POST /api/projects/:id/steering/:messageId/cancel',
 } as const;
 
 /** Proven argv on the demo laptop. Person 3 must use these. */
 export const PROVIDER_COMMANDS = {
   claude: {
     bin: 'claude',
+    /** stream-json emits one JSON event per line; --verbose is required with -p. */
+    stream: 'claude-jsonl' as const,
+    args: (prompt: string) => [
+      '-p',
+      prompt,
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--dangerously-skip-permissions',
+    ],
+  },
+  codex: {
+    bin: 'codex',
+    /** `codex exec --json` emits JSONL; shape varies by version, parser is tolerant. */
+    stream: 'codex-jsonl' as const,
+    args: (prompt: string) => [
+      'exec',
+      '--json',
+      '--sandbox',
+      'workspace-write',
+      '--skip-git-repo-check',
+      prompt,
+    ],
+  },
+} as const;
+
+/** Set LOOPSYNC_PLAIN_CLI=1 to fall back to the old text output format. */
+export const PROVIDER_COMMANDS_PLAIN = {
+  claude: {
+    bin: 'claude',
+    stream: 'text' as const,
     args: (prompt: string) => [
       '-p',
       prompt,
@@ -345,6 +609,7 @@ export const PROVIDER_COMMANDS = {
   },
   codex: {
     bin: 'codex',
+    stream: 'text' as const,
     args: (prompt: string) => [
       'exec',
       '--sandbox',
@@ -474,6 +739,15 @@ PLAN_DONE
 
 The JSON shape:
 {"reply":"short message to the user","items":[{"kind":"tests|code","title":"one work item","files":["path"],"doneWhen":"how we know it worked","prompt":"instructions including the latest steering"}]}`;
+}
+
+export function steeringAddendum(messages: readonly string[]): string {
+  if (messages.length === 0) {
+    return '';
+  }
+  return `\n\nSTEERING FROM THE USER (arrived while you were working, apply it now):\n${messages
+    .map((text) => `- ${text}`)
+    .join('\n')}`;
 }
 
 export function projectWriterPrompt(opts: {

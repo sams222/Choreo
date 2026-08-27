@@ -42,22 +42,50 @@ curl -s -X POST http://127.0.0.1:4055/api/reset
 curl -s -D- -X POST http://127.0.0.1:4055/api/tasks \
   -H 'content-type: application/json' \
   --data-binary @protocol/examples/http-post-tasks.request.json
+
+# live push instead of polling
+curl -sN http://127.0.0.1:4055/api/events
 ```
+
+Sending a message while a run is in flight is accepted (`202`), shown in the
+thread as queued, and folded into the prompt at the next loop boundary. Cancel
+it before it lands with
+`POST /api/projects/<id>/steering/<messageId>/cancel`.
+
+### Replay a recorded run
+
+Every thread item is appended to `data/loopsync-thread.jsonl`. Open
+`http://127.0.0.1:4055/?replay=<projectId>` to re-render a past run at 10×
+with no CLIs involved — useful when the live tools or the wifi are unreliable.
+`GET /api/replay` lists the recorded ids.
+
+### Environment
+
+| Variable | Effect |
+| --- | --- |
+| `LOOPSYNC_PLAIN_CLI=1` | Fall back to the old `--output-format text` argv if a CLI's JSON stream misbehaves |
+| `LOOPSYNC_WORKSPACE_ROOT` | Move the worktree root off `/tmp/loopsync-workspaces` |
 
 ## Layout
 
 - **[protocol/index.ts](protocol/index.ts)** — frozen types, PORT `4055`, CLI argv (additive fields only)
 - **[server/src/](server/src/)** — Express orchestrator, git runtime, Claude/Codex adapters, `runLoop`
-- **[web/](web/)** — live session (polls every 300ms): awaiting states, Cursor-style chat, no code pane
+- **[web/](web/)** — live session over SSE (`/api/events`, 300ms polling fallback): one composer, server-ordered thread, race view, rendered diffs
 - **[examples/sqrt/](examples/sqrt/)** — optional sample tree you can paste as a folder, not the default job
 - **[fixture/](fixture/)** — Gate 2 homework (`4 !== 5`)
 - **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration
 - **[docs/KERNEL_RISKS.md](docs/KERNEL_RISKS.md)** — spawn, review, oracle, cancel, slots, retry gaps
 
-## Proven CLI flags (do not change)
+## CLI flags
+
+Both CLIs are driven in JSONL event mode so the dashboard can show real tool
+calls (`editing sqrt.js`, `ran node --test`) instead of narrating.
 
 ```bash
-claude -p "<task>" --output-format text --dangerously-skip-permissions
-codex exec --sandbox workspace-write --skip-git-repo-check "<prompt>"
+claude -p "<task>" --output-format stream-json --verbose --dangerously-skip-permissions
+codex exec --json --sandbox workspace-write --skip-git-repo-check "<prompt>"
 node --test
 ```
+
+The parser is tolerant: any line it cannot read becomes a plain text event, and
+`LOOPSYNC_PLAIN_CLI=1` restores the previous text-mode argv wholesale.

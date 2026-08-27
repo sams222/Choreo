@@ -4,11 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LoopSync</title>
-    <link rel="stylesheet" href="styles.css?v=live1" />
+    <link rel="stylesheet" href="styles.css?v=live2" />
   </head>
   <body>
     <div id="unreachable" class="banner" hidden>
       Can’t reach LoopSync on :4055
+    </div>
+    <div id="replayBanner" class="banner replay" hidden>
+      Replaying a recorded run at 10× — no CLIs are running.
     </div>
 
     <div class="app">
@@ -17,22 +20,18 @@
           <p class="eyebrow">LoopSync</p>
           <h1 id="app-title">New project</h1>
         </div>
-        <div id="now" class="now idle" aria-live="polite">
-          <span class="pulse" aria-hidden="true"></span>
-          <div class="now-copy">
-            <p id="nowHeadline">Ready when you are</p>
-            <p id="nowSub">
-              Tests and implementation run as separate processes. The tests freeze
-              before a SHA.
-            </p>
-          </div>
+
+        <div class="head-mid">
+          <ul id="slots" class="slots" aria-label="Model slots"></ul>
+          <ol id="stepper" class="stepper" aria-label="Plan progress" hidden></ol>
+        </div>
+
+        <div class="head-right">
           <span id="elapsed" class="elapsed" hidden></span>
           <span id="status" class="badge" hidden></span>
+          <p id="oracleChip" class="oracle-chip" hidden></p>
         </div>
-        <p id="oracleChip" class="oracle-chip" hidden></p>
       </header>
-
-      <ol id="plan" class="pipeline" hidden></ol>
 
       <main class="stage" aria-labelledby="app-title">
         <div id="empty" class="hero">
@@ -48,88 +47,101 @@
             will not take a SHA until the tests are frozen.
           </p>
         </div>
-        <ol id="feed" class="feed" hidden></ol>
+        <ol id="feed" class="feed" aria-live="polite" aria-relevant="additions" hidden></ol>
       </main>
 
       <footer class="dock">
-        <p id="sourceReadout" class="source-readout" hidden></p>
+        <form id="composer" autocomplete="off">
+          <details id="settings" class="settings">
+            <summary>
+              <span class="settings-label">Settings</span>
+              <span id="settingsSummary" class="settings-summary"></span>
+            </summary>
+            <div class="settings-body">
+              <div class="dock-meta">
+                <label for="sourceDir">
+                  Folder (optional)
+                  <input
+                    id="sourceDir"
+                    name="ls-folder"
+                    type="text"
+                    autocomplete="new-password"
+                    spellcheck="false"
+                    placeholder="Leave blank to start empty"
+                  />
+                </label>
+                <label for="title">
+                  Title
+                  <input
+                    id="title"
+                    name="ls-title"
+                    type="text"
+                    autocomplete="new-password"
+                    placeholder="Untitled"
+                  />
+                </label>
+              </div>
 
-        <form id="launch-form" autocomplete="off">
-          <div class="dock-meta">
-            <label for="sourceDir">Folder (optional)</label>
-            <input
-              id="sourceDir"
-              name="ls-folder"
-              type="text"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="Leave blank to start empty"
-            />
-            <label for="title">Title</label>
-            <input
-              id="title"
-              name="ls-title"
-              type="text"
-              autocomplete="off"
-              placeholder="Untitled"
-            />
+              <div class="role-grid">
+                <label>
+                  Test author
+                  <select id="orchestratorProvider" name="orchestratorProvider">
+                    <option value="" selected>Same as implementer</option>
+                    <option value="codex">Codex</option>
+                    <option value="claude">Claude</option>
+                  </select>
+                </label>
+                <label>
+                  Implementer
+                  <select id="provider" name="provider">
+                    <option value="codex" selected>Codex</option>
+                    <option value="claude">Claude</option>
+                  </select>
+                </label>
+                <label>
+                  Reviewer
+                  <select id="reviewerProvider" name="reviewerProvider">
+                    <option value="">Tests only</option>
+                    <option value="claude" selected>Claude</option>
+                    <option value="codex">Codex</option>
+                  </select>
+                </label>
+                <label>
+                  Attempts
+                  <input
+                    id="maxIterations"
+                    name="ls-attempts"
+                    type="number"
+                    min="1"
+                    max="5"
+                    step="1"
+                    value="2"
+                    autocomplete="new-password"
+                  />
+                </label>
+              </div>
+              <p id="sourceReadout" class="source-readout" hidden></p>
+            </div>
+          </details>
+
+          <div class="composer-row">
+            <textarea
+              id="prompt"
+              name="ls-goal"
+              rows="3"
+              autocomplete="new-password"
+              placeholder="What should we build? Tests and implementation run as separate processes — send again mid-run to steer."
+            ></textarea>
+            <div class="composer-actions">
+              <button type="submit" id="send">Send</button>
+              <button type="button" id="cancel" class="ghost">Stop run</button>
+            </div>
           </div>
-
-          <label for="prompt">Goal</label>
-          <textarea
-            id="prompt"
-            name="ls-goal"
-            rows="5"
-            autocomplete="off"
-            placeholder="What should we build? LoopSync writes tests and implementation as separate steps, in parallel when two agents are free."
-          ></textarea>
-
-          <div class="role-grid">
-            <label>
-              Tests
-              <select id="orchestratorProvider" name="orchestratorProvider">
-                <option value="" selected>Same as write</option>
-                <option value="codex">Codex</option>
-                <option value="claude">Claude</option>
-              </select>
-            </label>
-            <label>
-              Write
-              <select id="provider" name="provider">
-                <option value="codex" selected>Codex</option>
-                <option value="claude">Claude</option>
-              </select>
-            </label>
-            <label>
-              Review
-              <select id="reviewerProvider" name="reviewerProvider">
-                <option value="">Tests only</option>
-                <option value="claude" selected>Claude</option>
-                <option value="codex">Codex</option>
-              </select>
-            </label>
-          </div>
-
           <p id="formError" class="form-error" hidden></p>
-          <div class="actions">
-            <button type="submit" id="launch">Run</button>
-            <button type="button" id="cancel">Stop this run</button>
-          </div>
-        </form>
-
-        <form id="follow-form" hidden>
-          <label for="followup">Steer the orchestrator</label>
-          <textarea
-            id="followup"
-            name="followup"
-            rows="3"
-            placeholder="Change the approach, drop a step, or tighten the contract."
-          ></textarea>
-          <p id="followError" class="form-error" hidden></p>
-          <div class="actions">
-            <button type="submit" id="send">Send</button>
-            <button type="button" id="followCancel">Stop this run</button>
-          </div>
+          <p id="composerHint" class="composer-hint">
+            Tests freeze before a SHA. Coding agents never run
+            <code>git commit</code>.
+          </p>
         </form>
 
         <button type="button" id="reset" class="text-reset" hidden>
@@ -150,6 +162,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=live1"></script>
+    <script src="app.js?v=live2"></script>
   </body>
 </html>

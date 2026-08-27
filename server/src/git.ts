@@ -5,7 +5,7 @@ import * as path from 'node:path';
 import {
   DEFAULT_TEST_COMMAND,
   ORACLE_PATHS,
-  WORKSPACE_ROOT,
+  workspaceRoot,
   isTestPath,
   type GitRuntime,
   type OutputFile,
@@ -34,8 +34,9 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
 
   async function createWorkspace(taskId: string, ctx?: WorkspaceContext) {
     const { sourceDir, persistDir, empty } = resolveCtx(ctx);
-    fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
-    const dir = persistDir ?? path.join(WORKSPACE_ROOT, taskId);
+    const root = workspaceRoot();
+    fs.mkdirSync(root, { recursive: true });
+    const dir = persistDir ?? path.join(root, taskId);
     const reusing =
       Boolean(persistDir) &&
       fs.existsSync(dir) &&
@@ -193,7 +194,7 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
   }
 
   async function resetAll() {
-    fs.rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
+    fs.rmSync(workspaceRoot(), { recursive: true, force: true });
   }
 
   async function isOracleDirty(dir: string, ctx?: WorkspaceContext) {

@@ -1,4 +1,6 @@
 import {
+  CLI_TIMEOUT_MS,
+  monotonicNow,
   parsePlanObject,
   parseReviewVerdict,
   planObjectPrompt,
@@ -7,10 +9,15 @@ import {
   reviewPrompt,
   reviewRetryPrompt,
   retryPrompt,
+  steeringAddendum,
   writerPromptWithPlan,
+  type AgentEvent,
+  type AgentRole,
   type CLIAdapter,
   type GitRuntime,
+  PROVIDER_LABEL,
   type ProviderType,
+  type RunResult,
   type StepId,
   type StepState,
   type StepStatus,
@@ -110,6 +117,7 @@ async function executeLoop(opts: {
       workspaceDir,
       oracleSha: oracle.oracleSha,
       capsRemaining: maxIterations,
+      startedAt: initial.startedAt ?? monotonicNow(),
     });
     await refreshOutputs(store, git, taskId, workspaceDir, ctx);
     record('workspace', { detail: workspace.dir });
@@ -154,14 +162,18 @@ async function executeLoop(opts: {
         `[loop] plan via ${orchestratorProvider}`,
       );
       try {
-        const planResult = await adapters[orchestratorProvider].run(
+        const planResult = await runAgent({
+          store,
+          adapters,
+          taskId,
+          provider: orchestratorProvider,
+          role: 'plan',
           workspaceDir,
-          initial.projectId
+          prompt: initial.projectId
             ? planObjectPrompt(title, prompt)
             : planPrompt(title, prompt),
-          (text) => appendChunk(store, taskId, '[plan] ', text),
           signal,
-        );
+        });
         planText = extractUsefulCliText(planResult.output);
         const parsedPlan = parsePlanObject(planResult.output);
         if (parsedPlan && initial.projectId) {
@@ -172,8 +184,13 @@ async function executeLoop(opts: {
         }
         pushTimeline(store, taskId, {
           role: 'plan',
-          title: `${orchestratorProvider} planned the work`,
+          title: `${PROVIDER_LABEL[orchestratorProvider]} planned the work`,
           body: planText,
+          provider: orchestratorProvider,
+          attempt,
+          durationMs: planResult.usage?.durationMs,
+          timedOut: planResult.timedOut,
+          tone: planResult.timedOut ? 'fail' : 'info',
         });
         record('plan', { attempt, step: 'plan', detail: 'ok' });
       } catch (err) {
@@ -208,7 +225,26 @@ async function executeLoop(opts: {
     if (initial.projectId) {
       const project = store.getProject();
       if (project && project.id === initial.projectId) {
+        // §3 — steering queued mid-run is applied here, at the loop boundary.
+        const steering = store.takeSteering();
+        if (steering.length > 0) {
+          writerPrompt = `${writerPrompt}${steeringAddendum(steering)}`;
+          appendLine(
+            store,
+            taskId,
+            `[loop] applied ${steering.length} steering message(s)`,
+          );
+          pushTimeline(store, taskId, {
+            role: 'loop',
+            title: 'Applied your steering',
+            body: steering.join('\n'),
+            tone: 'info',
+            attempt,
+          });
+          record('steering_applied', { attempt, detail: String(steering.length) });
+        }
         const thread = project.messages
+          .filter((message) => !message.cancelled)
           .map((message) => `${message.role}: ${message.text}`)
           .join('\n\n');
         writerPrompt = projectWriterPrompt({
@@ -221,23 +257,44 @@ async function executeLoop(opts: {
     }
 
     try {
-      const writerResult = await adapters[provider].run(
+      const writerResult = await runAgent({
+        store,
+        adapters,
+        taskId,
+        provider,
+        role: 'writer',
         workspaceDir,
-        writerPrompt,
-        (text) => appendChunk(store, taskId, '[writer] ', text),
+        prompt: writerPrompt,
         signal,
-      );
-      setStep(store, taskId, 'writer', 'ok');
+      });
+      setStep(store, taskId, 'writer', writerResult.timedOut ? 'fail' : 'ok');
+      if (writerResult.timedOut) {
+        store.updateTask(taskId, { timedOut: true });
+      }
       await refreshOutputs(store, git, taskId, workspaceDir, ctx);
+      const note = timeoutNote(writerResult);
+      const wroteTests = initial.jobKind === 'tests';
       pushTimeline(store, taskId, {
         role: 'writer',
-        title:
-          attempt === 1
-            ? `${provider} wrote code`
-            : `${provider} revised the code`,
+        title: note
+          ? `${PROVIDER_LABEL[provider]} ${note}`
+          : attempt === 1
+            ? wroteTests
+              ? `${PROVIDER_LABEL[provider]} authored the tests`
+              : `${PROVIDER_LABEL[provider]} wrote code`
+            : `${PROVIDER_LABEL[provider]} revised the code`,
         body: extractUsefulCliText(writerResult.output),
+        provider,
+        attempt,
+        durationMs: writerResult.usage?.durationMs,
+        timedOut: writerResult.timedOut,
+        tone: writerResult.timedOut ? 'fail' : 'info',
       });
-      record('writer', { attempt, step: 'writer' });
+      record('writer', {
+        attempt,
+        step: 'writer',
+        detail: writerResult.timedOut ? 'timeout' : undefined,
+      });
     } catch (err) {
       if (isGone(store, taskId, signal)) {
         markFailed(store, taskId, 'cancelled');
@@ -283,6 +340,9 @@ async function executeLoop(opts: {
         role: 'tests',
         title: 'Tests authored',
         body: testFiles.join(', '),
+        provider,
+        attempt,
+        tone: 'ok',
       });
       setStep(store, taskId, 'review', 'skipped');
       setStep(store, taskId, 'git', 'running');
@@ -294,11 +354,22 @@ async function executeLoop(opts: {
           ctx,
         );
         if (initial.projectId) {
-          store.updateProject({ oraclePaths: testFiles });
+          // §4 — the freeze is a beat in the thread, not a silent field change.
+          store.updateProject({ oraclePaths: testFiles, frozenAt: monotonicNow() });
         }
         await refreshOutputs(store, git, taskId, workspaceDir, {
           ...ctx,
           oraclePaths: testFiles,
+        });
+        setStep(store, taskId, 'git', 'ok');
+        pushTimeline(store, taskId, {
+          role: 'git',
+          title: commit
+            ? `Froze the tests at ${commit.sha.slice(0, 7)}`
+            : 'Froze the tests',
+          body: `${testFiles.join(', ')} are now the oracle. Coding agents never run git commit.`,
+          attempt,
+          tone: 'ok',
         });
         store.updateTask(taskId, {
           status: 'succeeded',
@@ -307,6 +378,7 @@ async function executeLoop(opts: {
           diff: commit?.diff,
           oraclePaths: testFiles,
           capsRemaining: capsRemaining - 1,
+          endedAt: monotonicNow(),
         });
         store.markPlanItemForTask(taskId, 'succeeded');
         record('succeeded', { attempt, step: 'git', detail: testFiles.join(',') });
@@ -328,6 +400,7 @@ async function executeLoop(opts: {
         status: 'succeeded',
         currentStep: 'done',
         capsRemaining: capsRemaining - 1,
+        endedAt: monotonicNow(),
       });
       store.markPlanItemForTask(taskId, 'succeeded');
       record('succeeded', { attempt, step: 'writer', detail: 'shard' });
@@ -382,8 +455,13 @@ async function executeLoop(opts: {
       store.updateTask(taskId, { lastError: tests.output });
       pushTimeline(store, taskId, {
         role: 'tests',
-        title: 'Tests failed',
+        title:
+          attempt < maxIterations
+            ? `Tests failed — retrying (attempt ${attempt + 1} of ${maxIterations})`
+            : 'Tests failed',
         body: extractUsefulCliText(tests.output, 800),
+        attempt,
+        tone: 'fail',
       });
       await refreshOutputs(store, git, taskId, workspaceDir, ctx);
       record('tests_fail', { attempt, step: 'tests' });
@@ -395,7 +473,10 @@ async function executeLoop(opts: {
     pushTimeline(store, taskId, {
       role: 'tests',
       title: 'Tests passed',
-      body: 'The oracle accepted the change.',
+      body: `${(ctx?.testCommand ?? ['node', '--test']).join(' ')} is the only SHA veto. It went green.`,
+      attempt,
+      tone: 'ok',
+      durationMs: stepDuration(store, taskId, 'tests'),
     });
     record('tests_pass', { attempt, step: 'tests' });
 
@@ -407,15 +488,21 @@ async function executeLoop(opts: {
       setStep(store, taskId, 'review', 'running');
       store.updateTask(taskId, { currentStep: 'review' });
       let reviewOutput = '';
+      let reviewTimedOut = false;
       try {
         const diff = await git.getDiff(workspaceDir);
-        const result = await adapters[reviewerProvider].run(
+        const result = await runAgent({
+          store,
+          adapters,
+          taskId,
+          provider: reviewerProvider,
+          role: 'review',
           workspaceDir,
-          reviewPrompt(diff, prompt),
-          (text) => appendChunk(store, taskId, '[review] ', text),
+          prompt: reviewPrompt(diff, prompt),
           signal,
-        );
+        });
         reviewOutput = result.output;
+        reviewTimedOut = result.timedOut === true;
       } catch (err) {
         if (isGone(store, taskId, signal)) {
           markFailed(store, taskId, 'cancelled');
@@ -438,8 +525,16 @@ async function executeLoop(opts: {
         store.updateTask(taskId, { lastError: lastReviewOutput || 'REVIEW_REJECT' });
         pushTimeline(store, taskId, {
           role: 'review',
-          title: `${reviewerProvider} requested changes`,
+          title: reviewTimedOut
+            ? `${PROVIDER_LABEL[reviewerProvider]} timed out — treated as a rejection`
+            : `${PROVIDER_LABEL[reviewerProvider]} requested changes`,
           body: lastReviewOutput,
+          provider: reviewerProvider,
+          verdict: 'reject',
+          attempt,
+          tone: 'fail',
+          timedOut: reviewTimedOut,
+          durationMs: stepDuration(store, taskId, 'review'),
         });
         record('review_reject', { attempt, step: 'review' });
         continue;
@@ -448,8 +543,13 @@ async function executeLoop(opts: {
       setStep(store, taskId, 'review', 'ok');
       pushTimeline(store, taskId, {
         role: 'review',
-        title: `${reviewerProvider} approved`,
+        title: `${PROVIDER_LABEL[reviewerProvider]} approved — and did not write this code`,
         body: extractUsefulCliText(reviewOutput, 400) || 'REVIEW_OK',
+        provider: reviewerProvider,
+        verdict: 'ok',
+        attempt,
+        tone: 'ok',
+        durationMs: stepDuration(store, taskId, 'review'),
       });
       record('review_ok', { attempt, step: 'review' });
     } else {
@@ -481,6 +581,7 @@ async function executeLoop(opts: {
           status: 'succeeded',
           currentStep: 'done',
           capsRemaining: capsRemaining - 1,
+          endedAt: monotonicNow(),
         });
         store.markPlanItemForTask(taskId, 'succeeded');
         record('succeeded', { attempt, step: 'git', detail: 'clean' });
@@ -489,21 +590,13 @@ async function executeLoop(opts: {
       appendLine(store, taskId, `[git] committed ${commit.sha.slice(0, 7)}`);
       setStep(store, taskId, 'git', 'ok');
       await refreshOutputs(store, git, taskId, workspaceDir, ctx);
-      const files = store.getTask(taskId)?.outputFiles ?? [];
-      pushTimeline(store, taskId, {
-        role: 'git',
-        title: 'Saved a snapshot',
-        body:
-          files.length > 0
-            ? files.map((file) => file.path).join(', ')
-            : commit.sha.slice(0, 7),
-      });
       store.updateTask(taskId, {
         status: 'succeeded',
         currentStep: 'done',
         commitSha: commit.sha,
         diff: commit.diff,
         capsRemaining: capsRemaining - 1,
+        endedAt: monotonicNow(),
       });
       store.markPlanItemForTask(taskId, 'succeeded');
       record('succeeded', { attempt, step: 'git', detail: commit.sha });
@@ -524,6 +617,64 @@ async function executeLoop(opts: {
   record('cap_exhausted');
 }
 
+/**
+ * One place where a CLI is invoked: logs still tail, but structured events
+ * (P0.1) are stamped with the role that asked for them and stored on the task.
+ */
+async function runAgent(opts: {
+  store: Store;
+  adapters: Record<ProviderType, CLIAdapter>;
+  taskId: string;
+  provider: ProviderType;
+  role: AgentRole;
+  workspaceDir: string;
+  prompt: string;
+  signal: AbortSignal;
+}): Promise<RunResult> {
+  const { store, adapters, taskId, provider, role, workspaceDir, prompt, signal } =
+    opts;
+  const prefix = `[${role}] `;
+  const result = await adapters[provider].run(
+    workspaceDir,
+    prompt,
+    (text) => appendChunk(store, taskId, prefix, text),
+    signal,
+    (event: AgentEvent) => {
+      store.appendTaskEvents(taskId, [{ ...event, role, provider }]);
+    },
+  );
+  if (result.usage) {
+    mergeUsage(store, taskId, result.usage);
+  }
+  return result;
+}
+
+function mergeUsage(
+  store: Store,
+  taskId: string,
+  usage: NonNullable<RunResult['usage']>,
+): void {
+  const task = store.getTask(taskId);
+  if (!task) {
+    return;
+  }
+  const current = task.usage ?? {};
+  store.updateTask(taskId, {
+    usage: {
+      durationMs: (current.durationMs ?? 0) + (usage.durationMs ?? 0),
+      costUsd: (current.costUsd ?? 0) + (usage.costUsd ?? 0),
+      numTurns: (current.numTurns ?? 0) + (usage.numTurns ?? 0),
+    },
+  });
+}
+
+/** P1.10 — a CLI killed by the timeout must not read as a clean success. */
+function timeoutNote(result: RunResult): string {
+  return result.timedOut
+    ? `timed out after ${Math.round(CLI_TIMEOUT_MS / 1000)}s`
+    : '';
+}
+
 function isGone(store: Store, taskId: string, signal: AbortSignal): boolean {
   return signal.aborted || store.getTask(taskId) === undefined;
 }
@@ -532,8 +683,25 @@ function markFailed(store: Store, taskId: string, lastError: string): void {
   if (!store.getTask(taskId)) {
     return;
   }
-  store.updateTask(taskId, { status: 'failed', lastError, currentStep: 'done' });
+  store.updateTask(taskId, {
+    status: 'failed',
+    lastError,
+    currentStep: 'done',
+    endedAt: monotonicNow(),
+  });
   store.markPlanItemForTask(taskId, 'failed');
+}
+
+function stepDuration(
+  store: Store,
+  taskId: string,
+  id: StepId,
+): number | undefined {
+  const step = store.getTask(taskId)?.steps?.find((entry) => entry.id === id);
+  if (!step?.startedAt) {
+    return undefined;
+  }
+  return (step.endedAt ?? Date.now()) - step.startedAt;
 }
 
 function setStep(
@@ -546,9 +714,28 @@ function setStep(
   if (!task) {
     return;
   }
-  const steps: StepState[] = (task.steps ?? defaultSteps(Boolean(task.reviewerProvider))).map(
-    (step) => (step.id === id ? { ...step, status } : step),
-  );
+  const now = Date.now();
+  const steps: StepState[] = (
+    task.steps ?? defaultSteps(Boolean(task.reviewerProvider))
+  ).map((step) => {
+    if (step.id !== id) {
+      return step;
+    }
+    if (status === 'running') {
+      return { ...step, status, startedAt: now, endedAt: undefined, durationMs: undefined };
+    }
+    if (status === 'ok' || status === 'fail') {
+      const startedAt = step.startedAt ?? now;
+      return {
+        ...step,
+        status,
+        startedAt,
+        endedAt: now,
+        durationMs: now - startedAt,
+      };
+    }
+    return { ...step, status };
+  });
   store.updateTask(taskId, { steps });
 }
 
@@ -622,10 +809,10 @@ function pushTimeline(
     return;
   }
   const next: TimelineEvent = {
+    ...event,
     id: `${event.role}_${(task.timeline?.length ?? 0) + 1}`,
-    role: event.role,
-    title: event.title,
-    body: event.body,
+    ts: event.ts ?? monotonicNow(),
+    attempt: event.attempt ?? task.currentIteration,
   };
   store.updateTask(taskId, { timeline: [...(task.timeline ?? []), next] });
 }

@@ -7,13 +7,17 @@ import type { Express, NextFunction, Request, Response } from 'express';
 import {
   DEFAULT_MAX_ITERATIONS,
   DEFAULT_TEST_COMMAND,
+  POLL_MS,
+  REPLAY_LOG,
   defaultBuildPlan,
+  monotonicNow,
   ensureTestsItem,
   inferJobKind,
   parsePlanObject,
   planObjectPrompt,
   steerPrompt,
-  WORKSPACE_ROOT,
+  workspaceRoot,
+  type AgentEvent,
   type CLIAdapter,
   type CreateProjectBody,
   type ErrorCode,
@@ -21,10 +25,15 @@ import {
   type JobKind,
   type LaunchTaskBody,
   type PlanItem,
+  type PlanObject,
+  type PlannerPhase,
   type ProjectState,
   type ProviderType,
+  type ServerSnapshot,
+  type ThreadItem,
 } from '../../protocol/index.ts';
 import { runLoop } from './loop.ts';
+import { buildThread } from './thread.ts';
 import type { Ledger } from './ledger.ts';
 import type { Store } from './state.ts';
 
@@ -286,6 +295,48 @@ export function createHttpApp(deps: {
   const repoRoot = deps.repoRoot ?? DEFAULT_REPO_ROOT;
   const controllers = new Map<string, AbortController>();
   const app = express();
+  const replayPath = path.resolve(repoRoot, REPLAY_LOG);
+  const replayed = new Set<string>();
+
+  /** §3 — the client renders this; it never rebuilds thread order itself. */
+  function snapshot(): ServerSnapshot {
+    const base = store.getSnapshot();
+    const thread = buildThread(base);
+    recordReplay(base, thread);
+    return { ...base, thread };
+  }
+
+  /**
+   * P2 — every thread item is appended once to a JSONL log, so a past run can
+   * be replayed at speed when the live CLIs (or the wifi) misbehave on stage.
+   */
+  function recordReplay(base: ServerSnapshot, thread: ThreadItem[]): void {
+    const projectId = base.project?.id;
+    if (!projectId) {
+      return;
+    }
+    const rows: string[] = [];
+    for (const item of thread) {
+      if (item.kind === 'live' || item.kind === 'race' || item.kind === 'merge') {
+        continue;
+      }
+      const key = `${projectId}:${item.id}`;
+      if (replayed.has(key)) {
+        continue;
+      }
+      replayed.add(key);
+      rows.push(JSON.stringify({ projectId, ts: item.ts, item }));
+    }
+    if (rows.length === 0) {
+      return;
+    }
+    try {
+      fs.mkdirSync(path.dirname(replayPath), { recursive: true });
+      fs.appendFileSync(replayPath, `${rows.join('\n')}\n`);
+    } catch {
+      // replay insurance is best-effort; never break the live run for it
+    }
+  }
 
   function slotsBusy(involved: Set<ProviderType>): ProviderType | undefined {
     const snapshot = store.getSnapshot();
@@ -333,12 +384,14 @@ export function createHttpApp(deps: {
     const testAuthor = project.plannerProvider ?? project.writerProvider;
     const provider = kind === 'tests' ? testAuthor : project.writerProvider;
     const empty = !project.sourceDir;
+    // A parallel code shard stops before tests, so it never reaches review.
+    const reviews = kind === 'code' && !opts?.skipCommit && !opts?.skipTests;
     return {
       title: item.title,
       prompt: item.prompt || project.goal,
       provider,
       maxIterations: project.maxIterations,
-      reviewerProvider: kind === 'code' ? project.reviewerProvider : undefined,
+      reviewerProvider: reviews ? project.reviewerProvider : undefined,
       projectId: project.id,
       sourceDir: project.sourceDir,
       oraclePaths: [...project.oraclePaths],
@@ -366,7 +419,11 @@ export function createHttpApp(deps: {
         ? (project.plannerProvider ?? project.writerProvider)
         : project.writerProvider;
     const involved = new Set<ProviderType>([provider]);
-    if (kind === 'code' && project.reviewerProvider) {
+    // Only hold the reviewer's slot when this run will actually review. A
+    // parallel code shard skips tests and review, and reserving the reviewer
+    // there deadlocks the race whenever reviewer === test author.
+    const reviews = kind === 'code' && !opts?.skipCommit && !opts?.skipTests;
+    if (reviews && project.reviewerProvider) {
       involved.add(project.reviewerProvider);
     }
     const busy = slotsBusy(involved);
@@ -380,6 +437,7 @@ export function createHttpApp(deps: {
     occupy(involved);
     const live = store.getProject() ?? project;
     const task = store.addTask(launchBodyForItem(live, item, opts));
+    store.updateTask(task.id, { planItemId: item.id, startedAt: monotonicNow() });
     store.patchPlanItem(item.id, { status: 'running', taskId: task.id, kind });
     store.updateProject({ activeTaskId: task.id });
     startLoop(task.id);
@@ -402,7 +460,11 @@ export function createHttpApp(deps: {
     try {
       await git.mergeShards(project.workspaceDir, shards.testsDir, shards.codeDir);
       const testFiles = await git.listTestFiles(project.workspaceDir);
-      store.updateProject({ oraclePaths: testFiles, shards: undefined });
+      store.updateProject({
+        oraclePaths: testFiles,
+        shards: undefined,
+        frozenAt: monotonicNow(),
+      });
       const ctx = {
         sourceDir: project.sourceDir,
         oraclePaths: testFiles,
@@ -472,6 +534,107 @@ export function createHttpApp(deps: {
     startProjectItem(store.getProject() ?? project, next);
   }
 
+  /**
+   * P1.6 — the orchestrator runs in the background with its output streamed
+   * into the thread, instead of blocking the HTTP response for up to 120s
+   * and throwing its tokens away.
+   */
+  async function runPlanner(opts: {
+    projectId: string;
+    provider: ProviderType;
+    phase: Exclude<PlannerPhase, 'idle' | 'done' | 'failed'>;
+    prompt: string;
+    fallback: PlanObject;
+    ensureTests: boolean;
+    note?: string;
+    involved: Set<ProviderType>;
+    after?: (plan: PlanObject) => void;
+  }): Promise<void> {
+    const { projectId, provider, phase, prompt, involved } = opts;
+    const startedAt = monotonicNow();
+    store.setPlanner({ phase, provider, startedAt, events: [], text: '' });
+    let plan = opts.fallback;
+    let error: string | undefined;
+    try {
+      const project = store.getProject();
+      if (!project || project.id !== projectId) {
+        return;
+      }
+      await git.createWorkspace(`${phase}_${projectId}`, {
+        sourceDir: project.sourceDir,
+        oraclePaths: project.oraclePaths,
+        testCommand: project.testCommand,
+        persistDir: project.workspaceDir,
+        empty: !project.sourceDir,
+      });
+      const result = await adapters[provider].run(
+        project.workspaceDir,
+        prompt,
+        (text) => store.appendPlannerEvents([], text),
+        new AbortController().signal,
+        (event: AgentEvent) =>
+          store.appendPlannerEvents([{ ...event, role: 'plan', provider }], ''),
+      );
+      const parsed = parsePlanObject(result.output);
+      if (parsed) {
+        plan = opts.ensureTests
+          ? ensureTestsItem(parsed, store.getProject()?.goal ?? '')
+          : parsed;
+      } else if (result.timedOut) {
+        error = 'the planner timed out';
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    } finally {
+      for (const provider of involved) {
+        store.setBusy(provider, false);
+      }
+    }
+
+    if (!store.getProject() || store.getProject()?.id !== projectId) {
+      return;
+    }
+    const finished = store.getProject()?.planner;
+    store.setPlanner({
+      phase: error ? 'failed' : 'done',
+      provider,
+      startedAt,
+      endedAt: monotonicNow(),
+      events: finished?.events ?? [],
+      text: finished?.text ?? '',
+      error,
+    });
+    store.addMessage('orchestrator', plan.reply);
+    store.applyPlanObject(plan, '', opts.note);
+    opts.after?.(plan);
+  }
+
+  /**
+   * §3 — steering that arrived after the last loop boundary still has to land.
+   * If nothing is left to run, re-run the last code item with it folded in.
+   */
+  function drainSteeringIntoRun(): boolean {
+    const project = store.getProject();
+    if (!project || (project.steering ?? []).length === 0) {
+      return false;
+    }
+    if (project.plan.some((item) => item.status === 'running' || item.status === 'pending')) {
+      return false;
+    }
+    const target =
+      [...project.plan].reverse().find((item) => inferJobKind(item) === 'code') ??
+      project.plan.at(-1);
+    if (!target) {
+      return false;
+    }
+    store.patchPlanItem(target.id, { status: 'pending', taskId: undefined });
+    const started = startProjectItem(store.getProject() ?? project, {
+      ...target,
+      status: 'pending',
+    });
+    return typeof started === 'string';
+  }
+
   function queueNextPlanItem(): void {
     const project = store.getProject();
     if (!project) {
@@ -502,6 +665,7 @@ export function createHttpApp(deps: {
       }
     }
     startEligibleItems();
+    drainSteeringIntoRun();
   }
 
   app.use(express.json());
@@ -518,7 +682,65 @@ export function createHttpApp(deps: {
   );
 
   app.get('/api/state', (_req, res) => {
-    res.status(200).json(store.getSnapshot());
+    res.status(200).json(snapshot());
+  });
+
+  /**
+   * P0.2 — push instead of poll. The client keeps polling as a fallback, but
+   * while this stream is open it only sees frames where something changed.
+   */
+  app.get('/api/events', (req, res) => {
+    res.status(200).set({
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+    let lastRev = -1;
+    const tick = () => {
+      const rev = store.getRev();
+      if (rev === lastRev) {
+        res.write(': ping\n\n');
+        return;
+      }
+      lastRev = rev;
+      res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
+    };
+    tick();
+    const timer = setInterval(tick, Math.max(80, Math.floor(POLL_MS / 3)));
+    req.on('close', () => {
+      clearInterval(timer);
+      res.end();
+    });
+  });
+
+  /** P2 — replay a recorded run: GET /api/replay?projectId=… */
+  app.get('/api/replay', (req, res) => {
+    let raw = '';
+    try {
+      raw = fs.readFileSync(replayPath, 'utf8');
+    } catch {
+      res.status(200).json({ items: [] });
+      return;
+    }
+    const wanted =
+      typeof req.query.projectId === 'string' ? req.query.projectId : '';
+    const items: Array<{ projectId: string; ts: number; item: ThreadItem }> = [];
+    for (const line of raw.split('\n')) {
+      if (line.trim() === '') continue;
+      try {
+        const row = JSON.parse(line);
+        if (wanted && row.projectId !== wanted && row.item?.taskId !== wanted) {
+          continue;
+        }
+        items.push(row);
+      } catch {
+        continue;
+      }
+    }
+    const projects = [...new Set(items.map((row) => row.projectId))];
+    res.status(200).json({ items, projects });
   });
 
   app.post('/api/projects', async (req, res) => {
@@ -555,7 +777,7 @@ export function createHttpApp(deps: {
         ? parsed.testCommand
         : [...DEFAULT_TEST_COMMAND];
     const projectId = store.newProjectId();
-    const workspaceDir = path.join(WORKSPACE_ROOT, projectId);
+    const workspaceDir = path.join(workspaceRoot(), projectId);
     const involved = involvedFromProject(
       {
         writerProvider: parsed.writerProvider,
@@ -584,54 +806,42 @@ export function createHttpApp(deps: {
       maxIterations: parsed.maxIterations ?? DEFAULT_MAX_ITERATIONS,
       messages: [],
       plan: [],
+      createdAt: monotonicNow(),
+      // Tests that already exist in the folder are frozen from the start.
+      frozenAt: oraclePaths.length > 0 ? monotonicNow() : undefined,
     });
     store.addMessage('user', parsed.goal);
 
-    let plan = defaultBuildPlan(parsed.goal);
-    if (oraclePaths.length > 0) {
-      plan = {
-        reply: 'This folder already has tests. I will implement against them and leave them locked.',
-        items: defaultBuildPlan(parsed.goal).items.filter(
-          (item) => inferJobKind(item) === 'code',
-        ),
-      };
-    }
+    const hasTests = oraclePaths.length > 0;
+    const fallback: PlanObject = hasTests
+      ? {
+          reply:
+            'This folder already has tests. I will implement against them and leave them locked.',
+          items: defaultBuildPlan(parsed.goal).items.filter(
+            (item) => inferJobKind(item) === 'code',
+          ),
+        }
+      : defaultBuildPlan(parsed.goal);
+
     if (parsed.plannerProvider) {
+      // P1.6 — answer now, plan in the background, stream the planner's work.
       occupy(involved);
-      try {
-        await git.createWorkspace(`plan_${projectId}`, {
-          sourceDir,
-          oraclePaths,
-          testCommand,
-          persistDir: workspaceDir,
-          empty: !sourceDir,
-        });
-        const result = await adapters[parsed.plannerProvider].run(
-          workspaceDir,
-          planObjectPrompt(parsed.title, parsed.goal),
-          () => {
-            /* plan JSON is parsed, not tailed */
-          },
-          new AbortController().signal,
-        );
-        const parsedPlan = parsePlanObject(result.output);
-        if (parsedPlan) {
-          plan =
-            oraclePaths.length > 0
-              ? parsedPlan
-              : ensureTestsItem(parsedPlan, parsed.goal);
-        }
-      } catch {
-        /* keep default plan */
-      } finally {
-        for (const provider of involved) {
-          store.setBusy(provider, false);
-        }
-      }
+      res.status(201).json({ projectId, taskId: '' });
+      void runPlanner({
+        projectId,
+        provider: parsed.plannerProvider,
+        phase: 'planning',
+        prompt: planObjectPrompt(parsed.title, parsed.goal),
+        fallback,
+        ensureTests: !hasTests,
+        involved,
+        after: () => startEligibleItems(),
+      });
+      return;
     }
 
-    store.addMessage('orchestrator', plan.reply);
-    store.applyPlanObject(plan, '');
+    store.addMessage('orchestrator', fallback.reply);
+    store.applyPlanObject(fallback, '');
     startEligibleItems();
     const live = store.getProject();
     if (!live) {
@@ -641,7 +851,7 @@ export function createHttpApp(deps: {
     res.status(201).json({ projectId, taskId: live.activeTaskId ?? '' });
   });
 
-  app.post('/api/projects/:id/messages', async (req, res) => {
+  app.post('/api/projects/:id/messages', (req, res) => {
     const project = store.getProject();
     if (!project || project.id !== req.params.id) {
       sendError(res, 404, 'PROJECT_NOT_FOUND', 'project not found');
@@ -660,13 +870,28 @@ export function createHttpApp(deps: {
     const userText = text.trim();
     const includePlanner = Boolean(project.plannerProvider);
     const involved = involvedFromProject(project, includePlanner);
-    const busy = slotsBusy(involved);
-    if (busy) {
-      sendError(res, 409, 'SLOT_BUSY', `${busy} is already running a task`);
-      return;
-    }
-    if (project.shards) {
-      sendError(res, 409, 'SLOT_BUSY', 'parallel shards are still merging');
+    const running = store
+      .getSnapshot()
+      .tasks.some(
+        (task) =>
+          task.projectId === project.id &&
+          (task.status === 'queued' ||
+            task.status === 'running' ||
+            task.status === 'retrying'),
+      );
+
+    /**
+     * §3 — steering used to be rejected with SLOT_BUSY. Now it lands in the
+     * thread immediately and the loop folds it in at the next boundary.
+     */
+    if (running || project.shards || slotsBusy(involved)) {
+      const queued = store.queueSteering(userText);
+      res.status(202).json({
+        ok: true,
+        taskId: '',
+        queued: true,
+        messageId: queued?.id,
+      });
       return;
     }
 
@@ -679,93 +904,85 @@ export function createHttpApp(deps: {
       return;
     }
 
-    let followItem: PlanItem = {
-      ...fallbackTarget,
-      prompt: `${fallbackTarget.prompt}\n\nFollow-up from the user:\n${userText}`,
-    };
-    let orchestratorReply = `Applying that to “${fallbackTarget.title}” and running the writer again. Locked tests: ${project.oraclePaths.join(', ')}.`;
-    let replacedPlan = false;
-
     if (project.plannerProvider) {
       occupy(involved);
-      const controller = new AbortController();
-      try {
-        await git.createWorkspace(`steer_${project.id}`, {
-          sourceDir: project.sourceDir,
-          oraclePaths: project.oraclePaths,
-          testCommand: project.testCommand,
-          persistDir: project.workspaceDir,
-          empty: !project.sourceDir,
-        });
-        const planJson = JSON.stringify(
-          project.plan.map((item) => ({
+      res.status(201).json({ ok: true, taskId: '' });
+      const planJson = JSON.stringify(
+        project.plan.map((item) => ({
+          title: item.title,
+          files: item.files,
+          doneWhen: item.doneWhen,
+          prompt: item.prompt,
+          status: item.status,
+        })),
+        null,
+        2,
+      );
+      const thread = project.messages
+        .filter((message) => !message.cancelled)
+        .map((message) => `${message.role}: ${message.text}`)
+        .join('\n\n');
+      void runPlanner({
+        projectId: project.id,
+        provider: project.plannerProvider,
+        phase: 'steering',
+        prompt: steerPrompt(project.goal, planJson, thread, userText),
+        fallback: {
+          reply: `Applying that to “${fallbackTarget.title}” and running the writer again. Locked tests: ${project.oraclePaths.join(', ') || 'none yet'}.`,
+          items: project.plan.map((item) => ({
+            kind: item.kind,
             title: item.title,
             files: item.files,
             doneWhen: item.doneWhen,
-            prompt: item.prompt,
-            status: item.status,
+            prompt: `${item.prompt}\n\nFollow-up from the user:\n${userText}`,
           })),
-          null,
-          2,
-        );
-        const thread = [...(store.getProject()?.messages ?? [])]
-          .map((message) => `${message.role}: ${message.text}`)
-          .join('\n\n');
-        const result = await adapters[project.plannerProvider].run(
-          project.workspaceDir,
-          steerPrompt(project.goal, planJson, thread, userText),
-          () => {
-            /* steering output is parsed, not tailed into the last job */
-          },
-          controller.signal,
-        );
-        const parsed = parsePlanObject(result.output);
-        if (parsed?.reply) {
-          orchestratorReply = parsed.reply;
-        }
-        if (parsed) {
-          store.applyPlanObject(parsed, '');
-          const first = store.getProject()?.plan[0];
-          if (first) {
-            followItem = first;
-            replacedPlan = true;
-          }
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        orchestratorReply = `Could not replan (${message}). Running the writer with your follow-up anyway.`;
-      } finally {
-        for (const provider of involved) {
-          store.setBusy(provider, false);
-        }
-      }
-    }
-
-    store.addMessage('orchestrator', orchestratorReply);
-    if (!replacedPlan) {
-      store.patchPlanItem(followItem.id, { prompt: followItem.prompt });
-    }
-    const live = store.getProject();
-    if (!live) {
-      sendError(res, 404, 'PROJECT_NOT_FOUND', 'project not found');
+        },
+        ensureTests: false,
+        note: `Steered by: “${userText}”`,
+        involved,
+        after: () => startEligibleItems(),
+      });
       return;
     }
+
+    const followPrompt = `${fallbackTarget.prompt}\n\nFollow-up from the user:\n${userText}`;
+    store.addMessage(
+      'orchestrator',
+      `Applying that to “${fallbackTarget.title}” and running the writer again. Locked tests: ${project.oraclePaths.join(', ') || 'none yet'}.`,
+    );
+    store.patchPlanItem(fallbackTarget.id, { prompt: followPrompt });
+    const live = store.getProject();
     const item =
-      live.plan.find((entry) => entry.id === followItem.id) ?? live.plan[0];
-    if (!item) {
+      live?.plan.find((entry) => entry.id === fallbackTarget.id) ??
+      live?.plan[0];
+    if (!live || !item) {
       sendError(res, 400, 'BAD_REQUEST', 'project has no plan items');
       return;
     }
     const started = startProjectItem(live, {
       ...item,
       kind: 'code',
-      prompt: followItem.prompt || item.prompt,
+      prompt: followPrompt,
     });
     if (typeof started !== 'string') {
       sendError(res, started.status, started.code, started.error);
       return;
     }
     res.status(201).json({ ok: true, taskId: started });
+  });
+
+  /** §3 — cancel a steering message that has not been folded in yet. */
+  app.post('/api/projects/:id/steering/:messageId/cancel', (req, res) => {
+    const project = store.getProject();
+    if (!project || project.id !== req.params.id) {
+      sendError(res, 404, 'PROJECT_NOT_FOUND', 'project not found');
+      return;
+    }
+    if (!store.cancelSteering(req.params.messageId)) {
+      sendError(res, 404, 'TASK_NOT_FOUND', 'no queued message with that id');
+      return;
+    }
+    res.status(200).json({ ok: true });
   });
 
   app.post('/api/tasks', (req, res) => {

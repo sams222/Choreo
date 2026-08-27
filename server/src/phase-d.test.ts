@@ -16,6 +16,11 @@ import type { CLIAdapter, ProviderType } from '../../protocol/index.ts';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const fixtureDir = path.join(repoRoot, 'fixture');
 
+// Test files run in parallel processes and /api/reset wipes the whole root,
+// so each file gets its own.
+const WORKSPACES = fs.mkdtempSync(path.join(os.tmpdir(), 'loopsync-phase-d-'));
+process.env.LOOPSYNC_WORKSPACE_ROOT = WORKSPACES;
+
 const TEST_FILE = `import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { integerSqrt } from './sqrt.js';
@@ -293,7 +298,7 @@ test('empty project writes tests then code; follow-up does not reset', async () 
   });
   assert.equal(created.res.status, 201, JSON.stringify(created.body));
   const projectId = created.body.projectId;
-  const workspaceDir = path.join('/tmp/loopsync-workspaces', projectId);
+  const workspaceDir = path.join(WORKSPACES, projectId);
 
   const succeeded = await waitUntil(async () => {
     const { body } = await json<Snapshot>(base, '/api/state');
