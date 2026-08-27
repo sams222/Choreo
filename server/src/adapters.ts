@@ -37,6 +37,7 @@ function spawnCli(
       shell: false,
       env: process.env,
       detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     let output = '';
