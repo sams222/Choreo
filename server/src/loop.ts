@@ -273,6 +273,84 @@ async function executeLoop(opts: {
       return;
     }
 
+    const jobKind = initial.jobKind ?? 'code';
+
+    if (jobKind === 'tests') {
+      let testFiles: string[] = [];
+      try {
+        testFiles = await git.listTestFiles(workspaceDir);
+      } catch (err) {
+        markFailed(store, taskId, errorMessage(err));
+        return;
+      }
+      if (testFiles.length === 0) {
+        lastTestOutput = 'test author wrote no test files';
+        appendLine(store, taskId, '[loop] no test files yet');
+        setStep(store, taskId, 'tests', 'fail');
+        pushTimeline(store, taskId, {
+          role: 'tests',
+          title: 'No tests written yet',
+          body: 'The test author must add automated tests before implementation starts.',
+        });
+        record('tests_missing', { attempt, step: 'tests' });
+        continue;
+      }
+      setStep(store, taskId, 'tests', 'ok');
+      pushTimeline(store, taskId, {
+        role: 'tests',
+        title: 'Tests authored',
+        body: testFiles.join(', '),
+      });
+      setStep(store, taskId, 'review', 'skipped');
+      setStep(store, taskId, 'git', 'running');
+      store.updateTask(taskId, { currentStep: 'git' });
+      try {
+        const commit = await git.commitIfDirty(
+          workspaceDir,
+          `LoopSync tests: ${title}`,
+          ctx,
+        );
+        if (initial.projectId) {
+          store.updateProject({ oraclePaths: testFiles });
+        }
+        await refreshOutputs(store, git, taskId, workspaceDir, {
+          ...ctx,
+          oraclePaths: testFiles,
+        });
+        store.updateTask(taskId, {
+          status: 'succeeded',
+          currentStep: 'done',
+          commitSha: commit?.sha,
+          diff: commit?.diff,
+          oraclePaths: testFiles,
+          capsRemaining: capsRemaining - 1,
+        });
+        store.markPlanItemForTask(taskId, 'succeeded');
+        record('succeeded', { attempt, step: 'git', detail: testFiles.join(',') });
+        return;
+      } catch (err) {
+        const message = errorMessage(err);
+        setStep(store, taskId, 'git', 'fail');
+        markFailed(store, taskId, message);
+        return;
+      }
+    }
+
+    if (initial.skipTests && initial.skipCommit) {
+      setStep(store, taskId, 'tests', 'skipped');
+      setStep(store, taskId, 'review', 'skipped');
+      setStep(store, taskId, 'git', 'skipped');
+      await refreshOutputs(store, git, taskId, workspaceDir, ctx);
+      store.updateTask(taskId, {
+        status: 'succeeded',
+        currentStep: 'done',
+        capsRemaining: capsRemaining - 1,
+      });
+      store.markPlanItemForTask(taskId, 'succeeded');
+      record('succeeded', { attempt, step: 'writer', detail: 'shard' });
+      return;
+    }
+
     store.updateTask(taskId, { currentStep: 'oracle' });
     let oracle;
     try {
@@ -475,9 +553,20 @@ async function executeLoop(opts: {
         ctx,
       );
       if (!commit) {
-        appendLine(store, taskId, '[git] working tree clean after passing tests');
-        setStep(store, taskId, 'git', 'fail');
-        markFailed(store, taskId, 'tests passed but nothing to commit');
+        appendLine(
+          store,
+          taskId,
+          '[git] working tree clean after passing tests',
+        );
+        setStep(store, taskId, 'git', 'ok');
+        await refreshOutputs(store, git, taskId, workspaceDir, ctx);
+        store.updateTask(taskId, {
+          status: 'succeeded',
+          currentStep: 'done',
+          capsRemaining: capsRemaining - 1,
+        });
+        store.markPlanItemForTask(taskId, 'succeeded');
+        record('succeeded', { attempt, step: 'git', detail: 'clean' });
         return;
       }
       appendLine(store, taskId, `[git] committed ${commit.sha.slice(0, 7)}`);
@@ -586,6 +675,8 @@ function jobContext(task: TaskState): WorkspaceContext | undefined {
     oraclePaths: task.oraclePaths,
     testCommand: task.testCommand,
     persistDir: task.persistDir,
+    empty: task.empty,
+    mode: task.jobKind,
   };
 }
 

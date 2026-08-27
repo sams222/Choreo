@@ -10,7 +10,7 @@ import type {
   ServerSnapshot,
   TaskState,
 } from '../../protocol/index.ts';
-import { DEFAULT_MAX_ITERATIONS } from '../../protocol/index.ts';
+import { DEFAULT_MAX_ITERATIONS, inferJobKind } from '../../protocol/index.ts';
 
 const MAX_LOGS = 500;
 
@@ -108,6 +108,10 @@ export function createStore(defaults?: DashboardDefaults) {
         oraclePaths: body.oraclePaths ? [...body.oraclePaths] : undefined,
         testCommand: body.testCommand ? [...body.testCommand] : undefined,
         persistDir: body.persistDir,
+        jobKind: body.jobKind,
+        skipTests: body.skipTests,
+        skipCommit: body.skipCommit,
+        empty: body.empty,
       };
       tasks = [...tasks, task];
       return cloneTask(task);
@@ -186,6 +190,11 @@ export function createStore(defaults?: DashboardDefaults) {
         plan: patch.plan
           ? patch.plan.map((item) => ({ ...item, files: [...item.files] }))
           : project.plan.map((item) => ({ ...item, files: [...item.files] })),
+        shards: patch.shards
+          ? { ...patch.shards }
+          : project.shards
+            ? { ...project.shards }
+            : undefined,
       });
       return cloneProject(project);
     },
@@ -223,8 +232,9 @@ export function createStore(defaults?: DashboardDefaults) {
         prompt: item.prompt?.trim() || item.title,
         files: [...(item.files ?? [])],
         doneWhen: item.doneWhen,
-        status: index === 0 ? 'running' : 'pending',
+        status: index === 0 && runningTaskId ? 'running' : 'pending',
         taskId: index === 0 && runningTaskId ? runningTaskId : undefined,
+        kind: inferJobKind(item),
       }));
       project = cloneProject({ ...project, plan: items });
       return cloneProject(project).plan;

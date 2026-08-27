@@ -4,54 +4,91 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LoopSync</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=live1" />
   </head>
   <body>
     <div id="unreachable" class="banner" hidden>
       Can’t reach LoopSync on :4055
     </div>
 
-    <main class="shell">
-      <section class="composer" aria-labelledby="app-title">
-        <header class="brand">
+    <div class="app">
+      <header class="top">
+        <div class="brand">
           <p class="eyebrow">LoopSync</p>
           <h1 id="app-title">New project</h1>
-        </header>
-
+        </div>
+        <div id="now" class="now idle" aria-live="polite">
+          <span class="pulse" aria-hidden="true"></span>
+          <div class="now-copy">
+            <p id="nowHeadline">Ready when you are</p>
+            <p id="nowSub">
+              Tests and implementation run as separate processes. The tests freeze
+              before a SHA.
+            </p>
+          </div>
+          <span id="elapsed" class="elapsed" hidden></span>
+          <span id="status" class="badge" hidden></span>
+        </div>
         <p id="oracleChip" class="oracle-chip" hidden></p>
+      </header>
+
+      <ol id="plan" class="pipeline" hidden></ol>
+
+      <main class="stage" aria-labelledby="app-title">
+        <div id="empty" class="hero">
+          <div class="orbit" aria-hidden="true">
+            <span class="node tests">Unit tests</span>
+            <span class="node orch">Orchestrator</span>
+            <span class="node code">Code</span>
+            <span class="beam"></span>
+          </div>
+          <p class="hero-copy">
+            State a goal. LoopSync plans, then writes tests and production code
+            as different processes — in parallel when two agents are free — and
+            will not take a SHA until the tests are frozen.
+          </p>
+        </div>
+        <ol id="feed" class="feed" hidden></ol>
+      </main>
+
+      <footer class="dock">
         <p id="sourceReadout" class="source-readout" hidden></p>
 
-        <ol id="thread" class="thread" hidden></ol>
-
-        <form id="launch-form">
-          <label for="sourceDir">Folder</label>
-          <input
-            id="sourceDir"
-            name="sourceDir"
-            type="text"
-            autocomplete="off"
-            spellcheck="false"
-            placeholder="examples/sqrt"
-            value="examples/sqrt"
-          />
-
-          <label for="title">Title</label>
-          <input
-            id="title"
-            name="title"
-            type="text"
-            autocomplete="off"
-            value="Integer square root"
-          />
+        <form id="launch-form" autocomplete="off">
+          <div class="dock-meta">
+            <label for="sourceDir">Folder (optional)</label>
+            <input
+              id="sourceDir"
+              name="ls-folder"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Leave blank to start empty"
+            />
+            <label for="title">Title</label>
+            <input
+              id="title"
+              name="ls-title"
+              type="text"
+              autocomplete="off"
+              placeholder="Untitled"
+            />
+          </div>
 
           <label for="prompt">Goal</label>
-          <textarea id="prompt" name="prompt" rows="8">Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js. Do not ask questions. Do not run git commit.</textarea>
+          <textarea
+            id="prompt"
+            name="ls-goal"
+            rows="5"
+            autocomplete="off"
+            placeholder="What should we build? LoopSync writes tests and implementation as separate steps, in parallel when two agents are free."
+          ></textarea>
 
           <div class="role-grid">
             <label>
-              Plan
+              Tests
               <select id="orchestratorProvider" name="orchestratorProvider">
-                <option value="" selected>LoopSync</option>
+                <option value="" selected>Same as write</option>
                 <option value="codex">Codex</option>
                 <option value="claude">Claude</option>
               </select>
@@ -74,11 +111,9 @@
           </div>
 
           <p id="formError" class="form-error" hidden></p>
-
           <div class="actions">
             <button type="submit" id="launch">Run</button>
-            <button type="button" id="cancel">Stop</button>
-            <button type="button" id="reset">Reset</button>
+            <button type="button" id="cancel">Stop this run</button>
           </div>
         </form>
 
@@ -87,56 +122,34 @@
           <textarea
             id="followup"
             name="followup"
-            rows="4"
-            placeholder="Switch the algorithm to binary search."
+            rows="3"
+            placeholder="Change the approach, drop a step, or tighten the contract."
           ></textarea>
           <p id="followError" class="form-error" hidden></p>
           <div class="actions">
             <button type="submit" id="send">Send</button>
-            <button type="button" id="followCancel">Stop</button>
-            <button type="button" id="followReset">Reset</button>
+            <button type="button" id="followCancel">Stop this run</button>
           </div>
         </form>
-      </section>
 
-      <section class="activity" aria-labelledby="activity-heading">
-        <div class="activity-head">
-          <h2 id="activity-heading">Activity</h2>
-          <span id="status" class="badge" hidden></span>
-        </div>
-        <p id="empty" class="empty">
-          Point LoopSync at a folder, describe the goal, and pick who plans,
-          writes, and reviews. Tests stay locked to that project — this is not
-          the parseIndex homework unless you open fixture/.
+        <button type="button" id="reset" class="text-reset" hidden>
+          Clear this project
+        </button>
+      </footer>
+    </div>
+
+    <div id="reset-confirm" class="confirm-mask" hidden>
+      <div class="confirm-card" role="dialog" aria-labelledby="reset-copy">
+        <p id="reset-copy">
+          Clear the live project from this session? The ledger on disk is kept.
         </p>
-        <div id="job" hidden>
-          <p id="attempt" class="attempt"></p>
-          <ol id="plan" class="plan-list" hidden></ol>
-          <ol id="steps" class="steps" aria-label="Pipeline"></ol>
-          <ol id="timeline" class="timeline"></ol>
-          <p id="shaLine" class="sha-line" hidden></p>
-          <details id="debug">
-            <summary>Technical details</summary>
-            <pre id="logs"></pre>
-            <pre id="lastError" hidden></pre>
-          </details>
+        <div class="actions">
+          <button type="button" id="reset-yes">Clear project</button>
+          <button type="button" id="reset-no">Keep going</button>
         </div>
-      </section>
+      </div>
+    </div>
 
-      <section class="files" aria-labelledby="files-heading">
-        <div class="files-head">
-          <h2 id="files-heading">Code</h2>
-          <p id="filesHint" class="files-hint">Output appears here</p>
-        </div>
-        <div id="fileTabs" class="file-tabs" hidden></div>
-        <pre id="fileView" class="file-view" hidden></pre>
-        <p id="filesEmpty" class="empty">
-          After the writer runs, changed files open here. A sqrt project shows
-          sqrt.js — never parse.js.
-        </p>
-      </section>
-    </main>
-
-    <script src="app.js"></script>
+    <script src="app.js?v=live1"></script>
   </body>
 </html>

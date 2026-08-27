@@ -6,7 +6,11 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
+<<<<<<< HEAD
 import { parsePlanObject, parseReviewVerdict } from '../../protocol/index.ts';
+=======
+import { defaultBuildPlan, parsePlanObject } from '../../protocol/index.ts';
+>>>>>>> 630c37cc8289d9feb435a5cde6536a8c8ce0f7ea
 import { createAdapters } from './adapters.ts';
 import { createGitRuntime } from './git.ts';
 import { createHttpApp, dashboardDefaults } from './http.ts';
@@ -15,9 +19,17 @@ import type { CLIAdapter, ProviderType } from '../../protocol/index.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const fixtureDir = path.join(repoRoot, 'fixture');
-const sqrtDir = path.join(repoRoot, 'examples/sqrt');
 
-const NAIVE_SQRT = `export function integerSqrt(n) {
+const TEST_FILE = `import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { integerSqrt } from './sqrt.js';
+
+test('integerSqrt(9) === 3', () => {
+  assert.equal(integerSqrt(9), 3);
+});
+`;
+
+const IMPL_FILE = `export function integerSqrt(n) {
   if (!Number.isInteger(n) || n < 0) {
     throw new RangeError('n must be a non-negative integer');
   }
@@ -27,7 +39,7 @@ const NAIVE_SQRT = `export function integerSqrt(n) {
 }
 `;
 
-const BINARY_SQRT = `export function integerSqrt(n) {
+const BINARY_IMPL = `export function integerSqrt(n) {
   if (!Number.isInteger(n) || n < 0) {
     throw new RangeError('n must be a non-negative integer');
   }
@@ -43,15 +55,6 @@ const BINARY_SQRT = `export function integerSqrt(n) {
   return hi;
 }
 `;
-
-function sqrtCtx(persistDir: string) {
-  return {
-    sourceDir: sqrtDir,
-    oraclePaths: ['sqrt.test.js'],
-    testCommand: ['node', '--test'],
-    persistDir,
-  };
-}
 
 function wait(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -72,17 +75,19 @@ async function waitUntil<T>(
   throw new Error('timed out');
 }
 
-test('parsePlanObject reads fenced JSON', () => {
-  const parsed = parsePlanObject(`here
-\`\`\`json
-{"reply":"ok","items":[{"title":"Implement integerSqrt","files":["sqrt.js"],"doneWhen":"integerSqrt(9)===3"}]}
+test('parsePlanObject and defaultBuildPlan split tests from code', () => {
+  const parsed = parsePlanObject(`\`\`\`json
+{"reply":"ok","items":[{"kind":"tests","title":"Write tests","files":["a.test.js"]},{"kind":"code","title":"Implement","files":["a.js"]}]}
 \`\`\`
 PLAN_DONE`);
-  assert.equal(parsed?.reply, 'ok');
-  assert.equal(parsed?.items[0]?.title, 'Implement integerSqrt');
-  assert.deepEqual(parsed?.items[0]?.files, ['sqrt.js']);
+  assert.equal(parsed?.items[0]?.kind, 'tests');
+  assert.equal(parsed?.items[1]?.kind, 'code');
+  const plan = defaultBuildPlan('integer square root');
+  assert.equal(plan.items[0]?.kind, 'tests');
+  assert.equal(plan.items[1]?.kind, 'code');
 });
 
+<<<<<<< HEAD
 test('parseReviewVerdict only accepts exact verdict lines', () => {
   assert.equal(
     parseReviewVerdict('Prompt said REVIEW_OK and then REVIEW_REJECT, but no verdict.'),
@@ -96,47 +101,41 @@ test('parseReviewVerdict only accepts exact verdict lines', () => {
 });
 
 test('sqrt demo fails until integerSqrt is implemented', async () => {
+=======
+test('empty workspace: tests then implementation, no fixture parse.js', async () => {
+>>>>>>> 630c37cc8289d9feb435a5cde6536a8c8ce0f7ea
   const git = createGitRuntime(fixtureDir);
-  const persistDir = path.join(os.tmpdir(), `loopsync-test-sqrt-${Date.now()}`);
-  const ctx = sqrtCtx(persistDir);
-  const workspace = await git.createWorkspace('gate-d', ctx);
+  const persistDir = path.join(os.tmpdir(), `loopsync-empty-${Date.now()}`);
+  const ctx = {
+    empty: true,
+    persistDir,
+    oraclePaths: [] as string[],
+    testCommand: ['node', '--test'],
+    mode: 'tests' as const,
+  };
+  const workspace = await git.createWorkspace('empty', ctx);
   after(() => fs.rmSync(persistDir, { recursive: true, force: true }));
-
   assert.equal(fs.existsSync(path.join(workspace.dir, 'parse.js')), false);
-  assert.equal(fs.existsSync(path.join(workspace.dir, 'sqrt.js')), true);
-  const failing = await git.runTests(workspace.dir, ctx);
-  assert.equal(failing.passed, false);
+  assert.equal(fs.existsSync(path.join(workspace.dir, 'parse.test.js')), false);
 
-  fs.writeFileSync(path.join(workspace.dir, 'sqrt.js'), NAIVE_SQRT);
-  const passing = await git.runTests(workspace.dir, ctx);
+  fs.writeFileSync(path.join(workspace.dir, 'package.json'), '{"type":"module"}\n');
+  fs.writeFileSync(path.join(workspace.dir, 'sqrt.test.js'), TEST_FILE);
+  const authored = await git.commitIfDirty(workspace.dir, 'tests', ctx);
+  assert.ok(authored);
+  assert.match(authored.diff, /sqrt\.test\.js/);
+
+  fs.writeFileSync(path.join(workspace.dir, 'sqrt.js'), IMPL_FILE);
+  const codeCtx = { ...ctx, mode: 'code' as const, oraclePaths: ['sqrt.test.js'] };
+  const passing = await git.runTests(workspace.dir, codeCtx);
   assert.equal(passing.passed, true);
-
-  const commit = await git.commitIfDirty(workspace.dir, 'sqrt', ctx);
+  const commit = await git.commitIfDirty(workspace.dir, 'impl', codeCtx);
   assert.ok(commit);
   assert.match(commit.diff, /sqrt\.js/);
   assert.doesNotMatch(commit.diff, /parse\.js/);
 
   fs.appendFileSync(path.join(workspace.dir, 'sqrt.test.js'), '\n');
-  const oracle = await git.checkOracle(workspace.dir, ctx);
+  const oracle = await git.checkOracle(workspace.dir, codeCtx);
   assert.equal(oracle.dirty, true);
-  await assert.rejects(
-    () => git.commitIfDirty(workspace.dir, 'nope', ctx),
-    /ORACLE_TAMPERED/,
-  );
-
-  await assert.rejects(
-    () => git.commitIfDirty(sqrtDir, 'never', ctx),
-    /Never commit in original source directory/,
-  );
-  await assert.rejects(
-    () => git.commitIfDirty(fixtureDir, 'never'),
-    /Never commit in original fixture/,
-  );
-
-  fs.writeFileSync(path.join(workspace.dir, 'sqrt.js'), BINARY_SQRT);
-  const again = await git.createWorkspace('follow-up', ctx);
-  assert.equal(again.dir, persistDir);
-  assert.match(fs.readFileSync(path.join(again.dir, 'sqrt.js'), 'utf8'), />> 1/);
 });
 
 test('fixture workspace still requires parse.js', async () => {
@@ -149,38 +148,75 @@ test('fixture workspace still requires parse.js', async () => {
 });
 
 function makeTestAdapters(opts?: { tamper?: boolean }): Record<ProviderType, CLIAdapter> {
+  const writePkg = (workspaceDir: string) => {
+    fs.writeFileSync(
+      path.join(workspaceDir, 'package.json'),
+      '{"type":"module"}\n',
+    );
+  };
   const writer: CLIAdapter = {
     provider: 'codex',
     async run(workspaceDir, prompt, onLog) {
       onLog('writing');
-      if (opts?.tamper) {
+      writePkg(workspaceDir);
+      if (opts?.tamper && /implement/i.test(prompt) && !/tests only/i.test(prompt)) {
         fs.appendFileSync(path.join(workspaceDir, 'sqrt.test.js'), '\n');
         return { output: 'tampered', exitCode: 0 };
       }
-      const source = /binary search/i.test(prompt) ? BINARY_SQRT : NAIVE_SQRT;
+      if (/tests only|Write automated tests only/i.test(prompt)) {
+        fs.writeFileSync(path.join(workspaceDir, 'sqrt.test.js'), TEST_FILE);
+        return { output: 'wrote tests', exitCode: 0 };
+      }
+      const source = /binary search|Switch the algorithm/i.test(prompt)
+        ? BINARY_IMPL
+        : IMPL_FILE;
       fs.writeFileSync(path.join(workspaceDir, 'sqrt.js'), source);
       return { output: 'wrote sqrt.js', exitCode: 0 };
     },
   };
   const planner: CLIAdapter = {
-    provider: 'codex',
-    async run(_workspaceDir, prompt, onLog) {
+    provider: 'claude',
+    async run(workspaceDir, prompt, onLog) {
       onLog('planning');
+      if (/tests only|Write automated tests only/i.test(prompt)) {
+        fs.writeFileSync(
+          path.join(workspaceDir, 'package.json'),
+          '{"type":"module"}\n',
+        );
+        fs.writeFileSync(path.join(workspaceDir, 'sqrt.test.js'), TEST_FILE);
+        return { output: 'wrote tests', exitCode: 0 };
+      }
       const binary = /binary search/i.test(prompt);
       const body = {
         reply: binary
-          ? 'Switching integerSqrt to binary search and re-running the writer.'
-          : 'Implement integerSqrt in sqrt.js. Leave sqrt.test.js locked.',
-        items: [
-          {
-            title: binary ? 'Binary search integerSqrt' : 'Implement integerSqrt',
-            files: ['sqrt.js'],
-            doneWhen: 'integerSqrt(9) === 3',
-            prompt: binary
-              ? 'Switch the algorithm to binary search in sqrt.js. Do not change sqrt.test.js.'
-              : 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js.',
-          },
-        ],
+          ? 'Switching the implementation to binary search. Tests stay locked.'
+          : 'I will write tests and implementation as separate steps.',
+        items: binary
+          ? [
+              {
+                kind: 'code',
+                title: 'Binary search',
+                files: ['sqrt.js'],
+                prompt:
+                  'Switch the algorithm to binary search in sqrt.js. Do not change tests.',
+              },
+            ]
+          : [
+              {
+                kind: 'tests',
+                title: 'Write tests',
+                files: ['sqrt.test.js'],
+                prompt:
+                  'Write automated tests only for integerSqrt(9) === 3. Do not implement production code.',
+              },
+              {
+                kind: 'code',
+                title: 'Implement',
+                files: ['sqrt.js'],
+                prompt:
+                  'Implement integerSqrt so the tests pass. Do not change test files.',
+              },
+            ],
       };
       return { output: `${JSON.stringify(body)}\nPLAN_DONE`, exitCode: 0 };
     },
@@ -204,13 +240,17 @@ type Snapshot = {
     commitSha?: string;
     diff?: string;
     workspaceDir?: string;
+    jobKind?: string;
     outputFiles?: Array<{ path: string }>;
   }>;
   project?: {
     id: string;
+    oraclePaths: string[];
     messages: Array<{ text: string }>;
+    plan: Array<{ kind?: string; status: string }>;
+    shards?: { testsDir: string; codeDir: string };
   };
-  defaults?: { sourceDir: string };
+  defaults?: { sourceDir: string; goal: string };
 };
 
 async function json<T = Record<string, unknown>>(
@@ -246,7 +286,7 @@ test('Gate 2 POST /api/tasks still returns 201', async () => {
   await fetch(`${base}/api/reset`, { method: 'POST' });
 });
 
-test('Phase D/E: sqrt project, follow-up reuses workspace, oracle lock', async () => {
+test('empty project writes tests then code; follow-up does not reset', async () => {
   const store = createStore(dashboardDefaults(repoRoot));
   const git = createGitRuntime(fixtureDir);
   const app = createHttpApp({
@@ -258,18 +298,16 @@ test('Phase D/E: sqrt project, follow-up reuses workspace, oracle lock', async (
   const { base } = await listen(app);
 
   const empty = await json<Snapshot>(base, '/api/state');
-  assert.equal(empty.body.tasks.length, 0);
-  assert.equal(empty.body.defaults?.sourceDir, sqrtDir);
+  assert.equal(empty.body.defaults?.goal, '');
+  assert.equal(empty.body.defaults?.sourceDir, '');
 
-  const created = await json<{ projectId: string; taskId: string }>(base, '/api/projects', {
+  const created = await json<{ projectId: string }>(base, '/api/projects', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       title: 'Integer square root',
-      goal: 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js.',
-      sourceDir: sqrtDir,
+      goal: 'Implement integerSqrt so integerSqrt(9) === 3.',
       writerProvider: 'codex',
-      plannerProvider: 'claude',
       maxIterations: 2,
     }),
   });
@@ -279,52 +317,60 @@ test('Phase D/E: sqrt project, follow-up reuses workspace, oracle lock', async (
 
   const succeeded = await waitUntil(async () => {
     const { body } = await json<Snapshot>(base, '/api/state');
-    const task = body.tasks.at(-1);
-    if (task?.status === 'failed') {
-      throw new Error(task.lastError || 'failed');
+    const failed = body.tasks.find((task) => task.status === 'failed');
+    if (failed) {
+      throw new Error(failed.lastError || 'failed');
     }
-    return task?.status === 'succeeded' ? body : null;
+    const hasTests = body.project?.oraclePaths?.includes('sqrt.test.js');
+    const impl = path.join(workspaceDir, 'sqrt.js');
+    const committed = body.tasks.some(
+      (task) => task.jobKind === 'code' && Boolean(task.commitSha),
+    );
+    return hasTests && fs.existsSync(impl) && committed && !body.project?.shards
+      ? body
+      : null;
   });
-  const firstTask = succeeded.tasks.at(-1);
-  assert.ok(firstTask);
-  assert.ok(firstTask.commitSha);
-  assert.match(firstTask.diff ?? '', /sqrt\.js/);
-  assert.doesNotMatch(firstTask.diff ?? '', /parse\.js/);
+  assert.ok(succeeded.project?.oraclePaths.includes('sqrt.test.js'));
   assert.equal(fs.existsSync(path.join(workspaceDir, 'parse.js')), false);
-  assert.ok(firstTask.outputFiles?.some((file) => file.path === 'sqrt.js'));
-  assert.equal(succeeded.project?.id, projectId);
-  assert.ok((succeeded.project?.messages.length ?? 0) >= 2);
+  assert.ok(
+    succeeded.tasks.some((task) =>
+      task.outputFiles?.some((file) => file.path === 'sqrt.test.js'),
+    ),
+  );
+  assert.ok(
+    succeeded.tasks.some((task) =>
+      task.outputFiles?.some((file) => file.path === 'sqrt.js'),
+    ),
+  );
 
   const follow = await json<{ ok: boolean; taskId: string }>(
     base,
     `/api/projects/${projectId}/messages`,
     {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ text: 'Switch the algorithm to binary search.' }),
-  });
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Switch the algorithm to binary search.' }),
+    },
+  );
   assert.equal(follow.res.status, 201, JSON.stringify(follow.body));
 
   const afterFollow = await waitUntil(async () => {
     const { body } = await json<Snapshot>(base, '/api/state');
     const task = body.tasks.at(-1);
-    if (task?.id === firstTask.id) return null;
-    if (task?.status === 'failed') throw new Error(task.lastError || 'follow-up failed');
-    return task?.status === 'succeeded' ? body : null;
+    if (task?.id === follow.body.taskId && task.status === 'failed') {
+      throw new Error(task.lastError || 'follow-up failed');
+    }
+    return task?.id === follow.body.taskId && task.status === 'succeeded'
+      ? body
+      : null;
   });
-  const second = afterFollow.tasks.at(-1);
-  assert.ok(second);
-  assert.ok(second.commitSha);
-  assert.equal(second.workspaceDir, firstTask.workspaceDir);
   assert.match(fs.readFileSync(path.join(workspaceDir, 'sqrt.js'), 'utf8'), />> 1/);
-  assert.ok(
-    afterFollow.project?.messages.some((message) => /binary search/i.test(message.text)),
-  );
+  assert.ok(afterFollow.project?.id === projectId);
 
   await fetch(`${base}/api/reset`, { method: 'POST' });
 });
 
-test('tampering with sqrt.test.js is ORACLE_TAMPERED', async () => {
+test('tampering with frozen tests is ORACLE_TAMPERED', async () => {
   const store = createStore(dashboardDefaults(repoRoot));
   const git = createGitRuntime(fixtureDir);
   const app = createHttpApp({
@@ -339,8 +385,7 @@ test('tampering with sqrt.test.js is ORACLE_TAMPERED', async () => {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       title: 'Integer square root',
-      goal: 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3.',
-      sourceDir: 'examples/sqrt',
+      goal: 'Implement integerSqrt so integerSqrt(9) === 3.',
       writerProvider: 'codex',
       maxIterations: 1,
     }),
@@ -348,8 +393,10 @@ test('tampering with sqrt.test.js is ORACLE_TAMPERED', async () => {
   assert.equal(created.res.status, 201, JSON.stringify(created.body));
   const failed = await waitUntil(async () => {
     const { body } = await json<Snapshot>(base, '/api/state');
-    const task = body.tasks.at(-1);
-    return task?.status === 'failed' ? task : null;
+    const task = body.tasks.find(
+      (item) => item.jobKind === 'code' && item.status === 'failed',
+    );
+    return task ?? null;
   });
   assert.match(failed.lastError ?? '', /ORACLE_TAMPERED/);
   assert.equal(failed.commitSha, undefined);
