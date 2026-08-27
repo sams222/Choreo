@@ -6,8 +6,6 @@ Launch Claude or Codex against an isolated copy of a tiny homework repo. LoopSyn
 
 Pick three roles on the dashboard: orchestrator (LoopSync, or a planner CLI), writer, reviewer. Same Launch JSON as before still works — omit `reviewerProvider` for writer + tests only.
 
-## Run locally
-
 Gemini CLI is out of scope (Google shut off individual Code Assist for that client). There is no fake adapter on the demo.
 
 ## Run locally
@@ -54,6 +52,7 @@ Open [http://127.0.0.1:4055](http://127.0.0.1:4055) for Reset → Launch → bad
 
 - **[docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)** — overview, demo script
 - **[docs/PHASE_C.md](docs/PHASE_C.md)** — after Gate 2: independent steps, oracle lock, reviewer (playbook [person-5](docs/person-5-phase-c.md))
+- **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration (goal → plan → many judged steps)
 - **[docs/person-1-orchestrator.md](docs/person-1-orchestrator.md)** — Track A (HTTP + loop)
 - **[docs/person-2-git-runtime.md](docs/person-2-git-runtime.md)** — Track B (git + tests)
 - **[docs/person-3-cli-adapters.md](docs/person-3-cli-adapters.md)** — Track C (Claude / Codex)

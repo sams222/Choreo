@@ -109,14 +109,12 @@ Codex and Claude may run **sequentially** on the demo laptop (one job). Do not d
 
 **Gate 4:** three rehearsals without a hung CLI. Kill button works.
 
-### After Gate 2 — optional Phase C (2026 loop engineering)
+### After Gate 2 — Phase C, then the platform
 
-Do **not** start until Gate 2 is true (real `runLoop`, not queue-only Launch). Phase C wraps the kernel: locked oracle, independent writer / tests / review / git steps, caps, optional reviewer agent. It does not replace Tracks A–D.
+- Loop engineering: [`PHASE_C.md`](PHASE_C.md)
+- Entire projects (Manus-shaped scheduler on the same kernel): [`PLATFORM.md`](PLATFORM.md)
 
-- Plan and file-by-file delta: [`PHASE_C.md`](PHASE_C.md)
-- Agent playbook: [`person-5-phase-c.md`](person-5-phase-c.md)
-
-Phases 0–4: `protocol/` is read-only. Phase C may **add** fields and examples only — never rename keys.
+Phases 0–4: `protocol/` is read-only. Phase C and the platform plan may **add** fields and examples only — never rename keys.
 
 ---
 

@@ -25,7 +25,7 @@ Both have already edited `/tmp/loopsync-smoke/parse.js` and made the test pass.
 
 **One Builder** drives Cursor agents and pushes `main`. Everyone else **debugs** (curl, CLIs, UI) or **plans the presentation**. The four “people” in the contracts are **agent tracks**, not four coders.
 
-Phased plan, gates, and parallel graphs: **[BUILD_PLAN.md](BUILD_PLAN.md)**. After Gate 2, optional 2026 sequel: **[PHASE_C.md](PHASE_C.md)** (playbook **[person-5-phase-c.md](person-5-phase-c.md)**).
+Phased plan, gates, and parallel graphs: **[BUILD_PLAN.md](BUILD_PLAN.md)**. After Gate 2, loop engineering: **[PHASE_C.md](PHASE_C.md)**. Full-project orchestration: **[PLATFORM.md](PLATFORM.md)**.
 
 ## Who owns what (agent tracks)
 
