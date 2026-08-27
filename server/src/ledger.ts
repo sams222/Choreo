@@ -19,7 +19,11 @@ export function createLedger(filePath: string) {
         ...event,
         ts: event.ts ?? new Date().toISOString(),
       };
-      fs.appendFileSync(filePath, `${JSON.stringify(row)}\n`);
+      try {
+        fs.appendFileSync(filePath, `${JSON.stringify(row)}\n`);
+      } catch {
+        // Ledger persistence is audit metadata; task correctness must continue.
+      }
     },
   };
 }

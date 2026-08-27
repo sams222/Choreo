@@ -118,7 +118,9 @@ function isInFlight(task) {
 }
 
 function updateActions(task) {
-  const selectedBusy = Boolean(els.provider.selectedOptions[0]?.disabled);
+  const selectedBusy = [els.provider, els.reviewerProvider, els.orchestratorProvider]
+    .filter(Boolean)
+    .some((select) => Boolean(select.value && select.selectedOptions[0]?.disabled));
   const inFlight = isInFlight(task);
   if (els.launch) els.launch.disabled = !reachable || selectedBusy;
   if (els.send) els.send.disabled = !reachable || inFlight;

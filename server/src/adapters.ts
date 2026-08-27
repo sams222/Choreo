@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import {
   CLI_TIMEOUT_MS,
   PROVIDER_COMMANDS,
+  type CLIAdapterRole,
   type CLIAdapter,
   type ProviderType,
   type RunResult,
@@ -42,10 +43,12 @@ function spawnCli(
     let output = '';
     let settled = false;
     let killing = false;
+    let timedOut = false;
+    let aborted = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
 
     const onAbort = () => {
-      abortChild();
+      abortChild('abort');
     };
 
     const cleanup = () => {
@@ -62,14 +65,19 @@ function spawnCli(
       }
       settled = true;
       cleanup();
-      resolve({ output, exitCode });
+      resolve({ output, exitCode, timedOut, aborted });
     };
 
-    const abortChild = () => {
+    const abortChild = (reason: 'abort' | 'timeout') => {
       if (killing) {
         return;
       }
       killing = true;
+      if (reason === 'abort') {
+        aborted = true;
+      } else {
+        timedOut = true;
+      }
       if (child.pid === undefined) {
         return;
       }
@@ -82,11 +90,11 @@ function spawnCli(
     };
 
     const timeoutId = setTimeout(() => {
-      abortChild();
+      abortChild('timeout');
     }, CLI_TIMEOUT_MS);
 
     if (signal.aborted) {
-      abortChild();
+      abortChild('abort');
     } else {
       signal.addEventListener('abort', onAbort);
     }
@@ -119,13 +127,13 @@ function makeAdapter(provider: ProviderType): CLIAdapter {
   const command = PROVIDER_COMMANDS[provider];
   return {
     provider,
-    run(workspaceDir, prompt, onLog, signal) {
+    run(workspaceDir, prompt, onLog, signal, role?: CLIAdapterRole) {
       if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
         throw new Error(`workspace missing: ${workspaceDir}`);
       }
       return spawnCli(
         command.bin,
-        command.args(prompt),
+        command.args(prompt, role),
         workspaceDir,
         onLog,
         signal,

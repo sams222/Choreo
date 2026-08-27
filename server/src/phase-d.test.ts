@@ -6,7 +6,7 @@ import path from 'node:path';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
-import { parsePlanObject } from '../../protocol/index.ts';
+import { parsePlanObject, parseReviewVerdict } from '../../protocol/index.ts';
 import { createAdapters } from './adapters.ts';
 import { createGitRuntime } from './git.ts';
 import { createHttpApp, dashboardDefaults } from './http.ts';
@@ -81,6 +81,18 @@ PLAN_DONE`);
   assert.equal(parsed?.reply, 'ok');
   assert.equal(parsed?.items[0]?.title, 'Implement integerSqrt');
   assert.deepEqual(parsed?.items[0]?.files, ['sqrt.js']);
+});
+
+test('parseReviewVerdict only accepts exact verdict lines', () => {
+  assert.equal(
+    parseReviewVerdict('Prompt said REVIEW_OK and then REVIEW_REJECT, but no verdict.'),
+    'reject',
+  );
+  assert.equal(parseReviewVerdict('Looks good\nREVIEW_OK\n'), 'ok');
+  assert.equal(
+    parseReviewVerdict('REVIEW_OK\nActually no.\nREVIEW_REJECT\nmissing case'),
+    'reject',
+  );
 });
 
 test('sqrt demo fails until integerSqrt is implemented', async () => {
@@ -341,5 +353,131 @@ test('tampering with sqrt.test.js is ORACLE_TAMPERED', async () => {
   });
   assert.match(failed.lastError ?? '', /ORACLE_TAMPERED/);
   assert.equal(failed.commitSha, undefined);
+  await fetch(`${base}/api/reset`, { method: 'POST' });
+});
+
+test('nonzero writer exit fails before tests or commit', async () => {
+  const store = createStore(dashboardDefaults(repoRoot));
+  const git = createGitRuntime(fixtureDir);
+  const badWriter: CLIAdapter = {
+    provider: 'codex',
+    async run(workspaceDir, _prompt, onLog) {
+      onLog('writer crashed');
+      fs.writeFileSync(path.join(workspaceDir, 'sqrt.js'), NAIVE_SQRT);
+      return { output: 'crash', exitCode: 2 };
+    },
+  };
+  const app = createHttpApp({
+    store,
+    git,
+    adapters: { claude: badWriter, codex: badWriter },
+    repoRoot,
+  });
+  const { base } = await listen(app);
+  const created = await json<{ projectId: string }>(base, '/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Integer square root',
+      goal: 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3.',
+      sourceDir: 'examples/sqrt',
+      writerProvider: 'codex',
+      maxIterations: 1,
+    }),
+  });
+  assert.equal(created.res.status, 201, JSON.stringify(created.body));
+  const failed = await waitUntil(async () => {
+    const { body } = await json<Snapshot>(base, '/api/state');
+    const task = body.tasks.at(-1);
+    return task?.status === 'failed' ? task : null;
+  });
+  assert.match(failed.lastError ?? '', /writer exited 2/);
+  assert.equal(failed.commitSha, undefined);
+  await fetch(`${base}/api/reset`, { method: 'POST' });
+});
+
+test('reviewer mutation is re-tested before commit', async () => {
+  const store = createStore(dashboardDefaults(repoRoot));
+  const git = createGitRuntime(fixtureDir);
+  const writer: CLIAdapter = {
+    provider: 'codex',
+    async run(workspaceDir, _prompt, onLog) {
+      onLog('writer fixed sqrt');
+      fs.writeFileSync(path.join(workspaceDir, 'sqrt.js'), NAIVE_SQRT);
+      return { output: 'fixed', exitCode: 0 };
+    },
+  };
+  const reviewer: CLIAdapter = {
+    provider: 'claude',
+    async run(workspaceDir, _prompt, onLog) {
+      onLog('reviewer approves and edits');
+      fs.writeFileSync(path.join(workspaceDir, 'sqrt.js'), 'export function integerSqrt() { return -1; }\n');
+      return { output: 'LGTM\nREVIEW_OK\n', exitCode: 0 };
+    },
+  };
+  const app = createHttpApp({
+    store,
+    git,
+    adapters: { claude: reviewer, codex: writer },
+    repoRoot,
+  });
+  const { base } = await listen(app);
+  const created = await json<{ projectId: string }>(base, '/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Integer square root',
+      goal: 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3.',
+      sourceDir: 'examples/sqrt',
+      writerProvider: 'codex',
+      reviewerProvider: 'claude',
+      maxIterations: 1,
+    }),
+  });
+  assert.equal(created.res.status, 201, JSON.stringify(created.body));
+  const failed = await waitUntil(async () => {
+    const { body } = await json<Snapshot>(base, '/api/state');
+    const task = body.tasks.at(-1);
+    return task?.status === 'failed' ? task : null;
+  });
+  assert.match(failed.lastError ?? '', /Expected values to be strictly equal|notStrictEqual|strictEqual/);
+  assert.equal(failed.commitSha, undefined);
+  await fetch(`${base}/api/reset`, { method: 'POST' });
+});
+
+test('ledger append failure does not leave task running', async () => {
+  const store = createStore(dashboardDefaults(repoRoot));
+  const git = createGitRuntime(fixtureDir);
+  const app = createHttpApp({
+    store,
+    git,
+    adapters: makeTestAdapters(),
+    ledger: {
+      path: 'throwing-ledger',
+      append() {
+        throw new Error('disk full');
+      },
+    },
+    repoRoot,
+  });
+  const { base } = await listen(app);
+  const created = await json<{ projectId: string }>(base, '/api/projects', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      title: 'Integer square root',
+      goal: 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3.',
+      sourceDir: 'examples/sqrt',
+      writerProvider: 'codex',
+      maxIterations: 1,
+    }),
+  });
+  assert.equal(created.res.status, 201, JSON.stringify(created.body));
+  const succeeded = await waitUntil(async () => {
+    const { body } = await json<Snapshot>(base, '/api/state');
+    const task = body.tasks.at(-1);
+    return task?.status === 'succeeded' ? task : null;
+  });
+  assert.ok(succeeded.commitSha);
   await fetch(`${base}/api/reset`, { method: 'POST' });
 });

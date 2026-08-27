@@ -83,7 +83,11 @@ export interface ServerSnapshot {
 export interface RunResult {
   output: string;
   exitCode: number;
+  timedOut?: boolean;
+  aborted?: boolean;
 }
+
+export type CLIAdapterRole = 'plan' | 'writer' | 'review';
 
 export interface TestResult {
   passed: boolean;
@@ -109,6 +113,7 @@ export interface CLIAdapter {
     prompt: string,
     onLog: (text: string) => void,
     signal: AbortSignal,
+    role?: CLIAdapterRole,
   ): Promise<RunResult>;
 }
 
@@ -310,7 +315,7 @@ export const HTTP = {
 export const PROVIDER_COMMANDS = {
   claude: {
     bin: 'claude',
-    args: (prompt: string) => [
+    args: (prompt: string, _role?: CLIAdapterRole) => [
       '-p',
       prompt,
       '--output-format',
@@ -320,10 +325,10 @@ export const PROVIDER_COMMANDS = {
   },
   codex: {
     bin: 'codex',
-    args: (prompt: string) => [
+    args: (prompt: string, role?: CLIAdapterRole) => [
       'exec',
       '--sandbox',
-      'workspace-write',
+      role === 'review' || role === 'plan' ? 'read-only' : 'workspace-write',
       '--skip-git-repo-check',
       prompt,
     ],
@@ -394,15 +399,16 @@ ${reviewOutput}`;
 }
 
 export function parseReviewVerdict(output: string): ReviewVerdict {
-  const ok = output.lastIndexOf(REVIEW_OK);
-  const reject = output.lastIndexOf(REVIEW_REJECT);
-  if (ok === -1 && reject === -1) {
-    return 'reject';
+  let verdict: ReviewVerdict | undefined;
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed === REVIEW_OK) {
+      verdict = 'ok';
+    } else if (trimmed === REVIEW_REJECT) {
+      verdict = 'reject';
+    }
   }
-  if (reject > ok) {
-    return 'reject';
-  }
-  return 'ok';
+  return verdict ?? 'reject';
 }
 
 export function planObjectPrompt(title: string, userPrompt: string): string {

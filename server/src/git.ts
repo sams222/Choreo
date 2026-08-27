@@ -11,6 +11,9 @@ import {
   type WorkspaceContext,
 } from '../../protocol/index.ts';
 
+const RESET_RETRIES = 5;
+const RESET_RETRY_DELAY_MS = 100;
+
 export function createGitRuntime(fixtureDir: string): GitRuntime {
   function resolveCtx(ctx?: WorkspaceContext) {
     const sourceDir = path.resolve(ctx?.sourceDir ?? fixtureDir);
@@ -75,8 +78,9 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
   }
 
   async function runTests(dir: string, ctx?: WorkspaceContext) {
-    const { testCommand } = resolveCtx(ctx);
-    const [bin, ...args] = testCommand;
+    const { testCommand, oraclePaths } = resolveCtx(ctx);
+    const command = scopedTestCommand(testCommand, oraclePaths);
+    const [bin, ...args] = command;
     if (!bin) {
       throw new Error('testCommand is empty');
     }
@@ -171,7 +175,17 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
   }
 
   async function resetAll() {
-    fs.rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
+    for (let attempt = 1; attempt <= RESET_RETRIES; attempt++) {
+      try {
+        fs.rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
+        return;
+      } catch (err) {
+        if (attempt === RESET_RETRIES || !isTransientRemoveError(err)) {
+          throw err;
+        }
+        await delay(RESET_RETRY_DELAY_MS * attempt);
+      }
+    }
   }
 
   async function isOracleDirty(dir: string, ctx?: WorkspaceContext) {
@@ -251,6 +265,33 @@ function spawnEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const env = extraEnv ? { ...process.env, ...extraEnv } : { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   return env;
+}
+
+function scopedTestCommand(
+  testCommand: string[],
+  oraclePaths: string[],
+): string[] {
+  if (
+    testCommand.length === 2 &&
+    testCommand[0] === 'node' &&
+    testCommand[1] === '--test' &&
+    oraclePaths.length > 0
+  ) {
+    return ['node', '--test', ...oraclePaths];
+  }
+  return testCommand;
+}
+
+function isTransientRemoveError(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') {
+    return false;
+  }
+  const code = (err as { code?: unknown }).code;
+  return code === 'EBUSY' || code === 'ENOTEMPTY' || code === 'EPERM';
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 type SpawnResult = {

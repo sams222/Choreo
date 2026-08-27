@@ -19,6 +19,7 @@ import {
   type PlanItem,
   type ProjectState,
   type ProviderType,
+  type RunResult,
 } from '../../protocol/index.ts';
 import { runLoop } from './loop.ts';
 import type { Ledger } from './ledger.ts';
@@ -281,6 +282,8 @@ export function createHttpApp(deps: {
   const { store, git, adapters, ledger } = deps;
   const repoRoot = deps.repoRoot ?? DEFAULT_REPO_ROOT;
   const controllers = new Map<string, AbortController>();
+  const runs = new Map<string, Promise<void>>();
+  let resetting = false;
   const app = express();
 
   function slotsBusy(involved: Set<ProviderType>): ProviderType | undefined {
@@ -303,7 +306,7 @@ export function createHttpApp(deps: {
   function startLoop(taskId: string): void {
     const controller = new AbortController();
     controllers.set(taskId, controller);
-    void runLoop({
+    const run = runLoop({
       store,
       git,
       adapters,
@@ -312,8 +315,12 @@ export function createHttpApp(deps: {
       signal: controller.signal,
     }).finally(() => {
       controllers.delete(taskId);
-      queueNextPlanItem();
+      runs.delete(taskId);
+      if (!resetting) {
+        queueNextPlanItem();
+      }
     });
+    runs.set(taskId, run);
   }
 
   function launchBodyForItem(
@@ -561,7 +568,9 @@ export function createHttpApp(deps: {
             /* steering output is parsed, not tailed into the last job */
           },
           controller.signal,
+          'plan',
         );
+        assertCleanCliResult(result, 'plan');
         const parsed = parsePlanObject(result.output);
         if (parsed?.reply) {
           orchestratorReply = parsed.reply;
@@ -657,29 +666,34 @@ export function createHttpApp(deps: {
     startLoop(task.id);
   });
 
-  app.post('/api/tasks/:id/cancel', (req, res) => {
+  app.post('/api/tasks/:id/cancel', async (req, res) => {
     const task = store.getTask(req.params.id);
     if (!task) {
       sendError(res, 404, 'TASK_NOT_FOUND', 'task not found');
       return;
     }
     controllers.get(task.id)?.abort();
+    await runs.get(task.id);
     res.status(200).json({ ok: true });
   });
 
   app.post('/api/reset', async (_req, res) => {
+    resetting = true;
     for (const controller of controllers.values()) {
       controller.abort();
     }
-    controllers.clear();
     try {
+      await Promise.allSettled([...runs.values()]);
+      controllers.clear();
       await git.resetAll();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       sendError(res, 500, 'RESET_FAILED', message);
+      resetting = false;
       return;
     }
     store.clear();
+    resetting = false;
     res.status(200).json({ ok: true });
   });
 
@@ -687,4 +701,16 @@ export function createHttpApp(deps: {
   app.use(express.static(WEB_DIR));
 
   return app;
+}
+
+function assertCleanCliResult(result: RunResult, step: string): void {
+  if (result.aborted) {
+    throw new Error(`${step} aborted`);
+  }
+  if (result.timedOut) {
+    throw new Error(`${step} timed out`);
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`${step} exited ${result.exitCode}`);
+  }
 }

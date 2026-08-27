@@ -11,6 +11,7 @@ import {
   type CLIAdapter,
   type GitRuntime,
   type ProviderType,
+  type RunResult,
   type StepId,
   type StepState,
   type StepStatus,
@@ -47,6 +48,13 @@ export async function runLoop(opts: {
     store.setBusy(provider, true);
   }
 
+  const record = (
+    event: string,
+    extra?: { attempt?: number; step?: string; detail?: string },
+  ) => {
+    safeRecord(ledger, taskId, event, extra);
+  };
+
   try {
     await executeLoop({
       store,
@@ -56,6 +64,11 @@ export async function runLoop(opts: {
       taskId,
       signal,
     });
+  } catch (err) {
+    const message = errorMessage(err);
+    appendLine(store, taskId, `[loop] crashed: ${message}`);
+    markFailed(store, taskId, message);
+    record('loop_crashed', { detail: message });
   } finally {
     for (const provider of involved) {
       store.setBusy(provider, false);
@@ -92,7 +105,7 @@ async function executeLoop(opts: {
     event: string,
     extra?: { attempt?: number; step?: string; detail?: string },
   ) => {
-    ledger?.append({ taskId, event, ...extra });
+    safeRecord(ledger, taskId, event, extra);
   };
 
   if (isGone(store, taskId, signal)) {
@@ -161,8 +174,10 @@ async function executeLoop(opts: {
             : planPrompt(title, prompt),
           (text) => appendChunk(store, taskId, '[plan] ', text),
           signal,
+          'plan',
         );
         planText = extractUsefulCliText(planResult.output);
+        assertCleanCliResult(planResult, 'plan');
         const parsedPlan = parsePlanObject(planResult.output);
         if (parsedPlan && initial.projectId) {
           store.applyPlanObject(parsedPlan, taskId);
@@ -226,7 +241,9 @@ async function executeLoop(opts: {
         writerPrompt,
         (text) => appendChunk(store, taskId, '[writer] ', text),
         signal,
+        'writer',
       );
+      assertCleanCliResult(writerResult, 'writer');
       setStep(store, taskId, 'writer', 'ok');
       await refreshOutputs(store, git, taskId, workspaceDir, ctx);
       pushTimeline(store, taskId, {
@@ -336,8 +353,10 @@ async function executeLoop(opts: {
           reviewPrompt(diff, prompt),
           (text) => appendChunk(store, taskId, '[review] ', text),
           signal,
+          'review',
         );
         reviewOutput = result.output;
+        assertCleanCliResult(result, 'review');
       } catch (err) {
         if (isGone(store, taskId, signal)) {
           markFailed(store, taskId, 'cancelled');
@@ -376,6 +395,70 @@ async function executeLoop(opts: {
       record('review_ok', { attempt, step: 'review' });
     } else {
       setStep(store, taskId, 'review', 'skipped');
+    }
+
+    if (reviewerProvider) {
+      store.updateTask(taskId, { currentStep: 'oracle' });
+      let postReviewOracle;
+      try {
+        postReviewOracle = await git.checkOracle(workspaceDir, ctx);
+      } catch (err) {
+        const message = errorMessage(err);
+        markFailed(store, taskId, message);
+        return;
+      }
+      store.updateTask(taskId, { oracleSha: postReviewOracle.oracleSha });
+      if (postReviewOracle.dirty) {
+        appendLine(
+          store,
+          taskId,
+          `[loop] ORACLE_TAMPERED after review: ${oracleLabel} changed; refusing commit`,
+        );
+        setStep(store, taskId, 'tests', 'fail');
+        setStep(store, taskId, 'git', 'fail');
+        markFailed(store, taskId, 'ORACLE_TAMPERED');
+        record('oracle_tampered_after_review', { attempt, step: 'oracle' });
+        return;
+      }
+
+      setStep(store, taskId, 'tests', 'running');
+      store.updateTask(taskId, { currentStep: 'tests' });
+      let postReviewTests;
+      try {
+        postReviewTests = await git.runTests(workspaceDir, ctx);
+      } catch (err) {
+        const message = errorMessage(err);
+        appendLine(store, taskId, `[tests] post-review error: ${message}`);
+        setStep(store, taskId, 'tests', 'fail');
+        markFailed(store, taskId, message);
+        return;
+      }
+      if (!postReviewTests.passed) {
+        lastTestOutput = postReviewTests.output;
+        lastReviewOutput = '';
+        appendLine(
+          store,
+          taskId,
+          `[tests] post-review fail exit=${postReviewTests.exitCode}`,
+        );
+        setStep(store, taskId, 'tests', 'fail');
+        store.updateTask(taskId, { lastError: postReviewTests.output });
+        pushTimeline(store, taskId, {
+          role: 'tests',
+          title: 'Tests failed after review',
+          body: extractUsefulCliText(postReviewTests.output, 800),
+        });
+        await refreshOutputs(store, git, taskId, workspaceDir, ctx);
+        record('post_review_tests_fail', { attempt, step: 'tests' });
+        continue;
+      }
+      appendLine(
+        store,
+        taskId,
+        `[tests] post-review pass exit=${postReviewTests.exitCode}`,
+      );
+      setStep(store, taskId, 'tests', 'ok');
+      record('post_review_tests_pass', { attempt, step: 'tests' });
     }
 
     if (isGone(store, taskId, signal)) {
@@ -552,4 +635,29 @@ function appendLines(store: Store, taskId: string, lines: string[]): void {
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function assertCleanCliResult(result: RunResult, step: string): void {
+  if (result.aborted) {
+    throw new Error(`${step} aborted`);
+  }
+  if (result.timedOut) {
+    throw new Error(`${step} timed out`);
+  }
+  if (result.exitCode !== 0) {
+    throw new Error(`${step} exited ${result.exitCode}`);
+  }
+}
+
+function safeRecord(
+  ledger: Ledger | undefined,
+  taskId: string,
+  event: string,
+  extra?: { attempt?: number; step?: string; detail?: string },
+): void {
+  try {
+    ledger?.append({ taskId, event, ...extra });
+  } catch {
+    // Ledger durability should never decide task correctness.
+  }
 }
