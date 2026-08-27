@@ -12,6 +12,7 @@ import type {
   ProviderType,
 } from '../../protocol/index.ts';
 import { runLoop } from './loop.ts';
+import type { Ledger } from './ledger.ts';
 import type { Store } from './state.ts';
 
 const WEB_DIR = path.resolve(
@@ -52,6 +53,21 @@ function readLaunchBody(req: Request): LaunchTaskBody | { error: string } {
     prompt: record.prompt,
     provider: record.provider,
   };
+  if (record.reviewerProvider !== undefined && record.reviewerProvider !== '') {
+    if (!isProvider(record.reviewerProvider)) {
+      return { error: 'reviewerProvider must be claude or codex' };
+    }
+    launch.reviewerProvider = record.reviewerProvider;
+  }
+  if (
+    record.orchestratorProvider !== undefined &&
+    record.orchestratorProvider !== ''
+  ) {
+    if (!isProvider(record.orchestratorProvider)) {
+      return { error: 'orchestratorProvider must be claude or codex' };
+    }
+    launch.orchestratorProvider = record.orchestratorProvider;
+  }
   if (record.maxIterations !== undefined) {
     if (
       typeof record.maxIterations !== 'number' ||
@@ -69,8 +85,9 @@ export function createHttpApp(deps: {
   store: Store;
   git: GitRuntime;
   adapters: Record<ProviderType, CLIAdapter>;
+  ledger?: Ledger;
 }): Express {
-  const { store, git, adapters } = deps;
+  const { store, git, adapters, ledger } = deps;
   const controllers = new Map<string, AbortController>();
   const app = express();
 
@@ -103,18 +120,29 @@ export function createHttpApp(deps: {
     }
 
     const snapshot = store.getSnapshot();
-    const slot = snapshot.slots.find((item) => item.provider === parsed.provider);
-    if (slot?.isBusy) {
-      sendError(
-        res,
-        409,
-        'SLOT_BUSY',
-        `${parsed.provider} is already running a task`,
-      );
-      return;
+    const involved = new Set<ProviderType>([parsed.provider]);
+    if (parsed.reviewerProvider) {
+      involved.add(parsed.reviewerProvider);
+    }
+    if (parsed.orchestratorProvider) {
+      involved.add(parsed.orchestratorProvider);
+    }
+    for (const provider of involved) {
+      const slot = snapshot.slots.find((item) => item.provider === provider);
+      if (slot?.isBusy) {
+        sendError(
+          res,
+          409,
+          'SLOT_BUSY',
+          `${provider} is already running a task`,
+        );
+        return;
+      }
     }
 
-    store.setBusy(parsed.provider, true);
+    for (const provider of involved) {
+      store.setBusy(provider, true);
+    }
     const task = store.addTask(parsed);
     const controller = new AbortController();
     controllers.set(task.id, controller);
@@ -123,6 +151,7 @@ export function createHttpApp(deps: {
       store,
       git,
       adapters,
+      ledger,
       taskId: task.id,
       signal: controller.signal,
     }).finally(() => {

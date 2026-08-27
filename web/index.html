@@ -17,8 +17,10 @@
           <p class="eyebrow">Mission control</p>
           <h1 id="app-title">LoopSync</h1>
           <p class="lede">
-            Launch Codex or Claude at the failing parseIndex fixture. Our tests
-            decide; the agent never commits.
+            Pick an orchestrator, a writer, and a reviewer. LoopSync copies the
+            failing fixture, the writer edits production code, tests veto the
+            SHA, and a separate reviewer process audits green tests. Nobody
+            but LoopSync commits.
           </p>
         </header>
 
@@ -35,11 +37,28 @@
           <label for="prompt">Prompt</label>
           <textarea id="prompt" name="prompt" rows="7">The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.</textarea>
 
-          <label for="provider">Provider</label>
-          <select id="provider" name="provider">
-            <option value="codex" selected>codex</option>
-            <option value="claude">claude</option>
-          </select>
+          <fieldset class="roles">
+            <legend>Agents</legend>
+            <label for="orchestratorProvider">Orchestrator</label>
+            <select id="orchestratorProvider" name="orchestratorProvider">
+              <option value="" selected>LoopSync (Node harness)</option>
+              <option value="codex">codex — plan only</option>
+              <option value="claude">claude — plan only</option>
+            </select>
+
+            <label for="provider">Writer</label>
+            <select id="provider" name="provider">
+              <option value="codex" selected>codex</option>
+              <option value="claude">claude</option>
+            </select>
+
+            <label for="reviewerProvider">Reviewer</label>
+            <select id="reviewerProvider" name="reviewerProvider">
+              <option value="">none (tests only)</option>
+              <option value="claude" selected>claude — adversarial</option>
+              <option value="codex">codex — adversarial</option>
+            </select>
+          </fieldset>
 
           <p id="formError" class="form-error" hidden></p>
 
@@ -60,6 +79,8 @@
             <span id="status" class="badge"></span>
             <p id="attempt"></p>
           </div>
+          <p id="rolesLine" class="roles-line"></p>
+          <ol id="steps" class="steps" aria-label="Pipeline steps"></ol>
 
           <h3>Logs</h3>
           <pre id="logs"></pre>

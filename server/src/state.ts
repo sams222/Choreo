@@ -15,7 +15,11 @@ const IDLE_SLOTS: ServerSnapshot['slots'] = [
 ];
 
 function cloneTask(task: TaskState): TaskState {
-  return { ...task, logs: [...task.logs] };
+  return {
+    ...task,
+    logs: [...task.logs],
+    steps: task.steps?.map((step) => ({ ...step })),
+  };
 }
 
 function newTaskId(): string {
@@ -42,6 +46,7 @@ export function createStore() {
     },
 
     addTask(body: LaunchTaskBody): TaskState {
+      const hasReviewer = Boolean(body.reviewerProvider);
       const task: TaskState = {
         id: newTaskId(),
         title: body.title,
@@ -52,6 +57,16 @@ export function createStore() {
         maxIterations: body.maxIterations ?? DEFAULT_MAX_ITERATIONS,
         workspaceDir: '',
         logs: [],
+        orchestratorProvider: body.orchestratorProvider,
+        reviewerProvider: body.reviewerProvider,
+        currentStep: 'writer',
+        capsRemaining: body.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        steps: [
+          { id: 'writer', status: 'pending' },
+          { id: 'tests', status: 'pending' },
+          { id: 'review', status: hasReviewer ? 'pending' : 'skipped' },
+          { id: 'git', status: 'pending' },
+        ],
       };
       tasks = [...tasks, task];
       return cloneTask(task);
@@ -72,6 +87,9 @@ export function createStore() {
         ...current,
         ...patch,
         logs: capLogs(patch.logs ?? current.logs),
+        steps: patch.steps
+          ? patch.steps.map((step) => ({ ...step }))
+          : current.steps?.map((step) => ({ ...step })),
       };
       tasks = tasks.map((item, i) => (i === index ? next : item));
       return cloneTask(next);

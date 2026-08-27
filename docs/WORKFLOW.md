@@ -172,22 +172,19 @@ Returns **200** `{ "ok": true }`.
 
 ## Orchestration (`runLoop`)
 
-HTTP is only the front door. After the 201, Track A’s loop is the only integrator. Git and adapters plug into it; they do not call each other.
+HTTP is only the front door. After the 201, Track A’s loop is the only integrator. Phase C adds independent steps; Node still starts every one.
 
 ```
 createWorkspace
-for attempt 1..maxIterations:
-  status = running (or retrying if attempt > 1)
-  adapter.run(dir, prompt or prompt+lastError, onLog, signal)
-  tests = runTests(dir)
-  if tests.passed:
-    commitIfDirty
-    status = succeeded
-    stop
-  else:
-    lastError = tests.output
-    status = retrying
-status = failed
+while attempts remain:
+  optional orchestrator.plan (new process, no file edits)
+  writer.run          [writer]
+  if parse.test.js dirty → fail ORACLE_TAMPERED (no commit)
+  tests = runTests    [tests]  ← only SHA veto
+  if tests fail → TAP retry writer (skip reviewer)
+  if tests pass && reviewerProvider → reviewer.run [review]
+  if review reject → retry writer with review text (no commit)
+  if tests pass && (no reviewer || review ok) → commitIfDirty [git]
 ```
 
 There is **no** CLI “resume.” Attempt 2 is a **new process**. Coding agents must not `git commit`; `git.ts` is the only committer.
@@ -259,13 +256,15 @@ Cancel/Reset can fire in the middle: if `AbortSignal` is aborted, the loop stops
 
 ## Scaffold vs this workflow
 
-This file describes the **full** path. What is wired on `main` today:
+This file describes the **full** path. After Gate 2 + Phase C:
 
 | Piece | Status |
 |---|---|
-| `GET/POST` routes in `http.ts` | Built. Launch **queues only** — it does not start `runLoop` |
-| `state.ts` | Built. `setBusy` is unused until the loop exists |
-| `git.ts` | Built as a library; `index.ts` still injects a stub |
-| `loop.ts`, `adapters.ts`, `web/` | Not built yet |
+| Four HTTP routes | Launch starts `runLoop` |
+| `loop.ts` | Writer → oracle lock → tests → optional reviewer → git |
+| `git.ts` | Oracle lock on `parse.test.js`; commit only `parse.js` |
+| `adapters.ts` | Claude / Codex; stdin ignored |
+| `web/` | Writer + reviewer + orchestrator selects; step badges |
+| Ledger | `data/loopsync-ledger.jsonl` (Reset does not wipe it) |
 
-Until those land, curl can 201 a `queued` task that never leaves `queued`. Phases and gates: [`BUILD_PLAN.md`](BUILD_PLAN.md). After Gate 2, wrap this kernel with independent writer / tests / review / git steps: [`PHASE_C.md`](PHASE_C.md).
+Old Launch JSON (writer only) still 201s. Add `reviewerProvider` for the adversarial second gate. See [`PHASE_C.md`](PHASE_C.md).

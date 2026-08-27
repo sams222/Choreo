@@ -91,6 +91,75 @@ form {
   gap: 8px;
 }
 
+fieldset.roles {
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+fieldset.roles legend {
+  padding: 0 6px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.roles-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.step.pending {
+  color: var(--muted);
+}
+
+.step.running {
+  color: var(--info);
+  border-color: var(--info);
+}
+
+.step.ok {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.step.fail {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.step.skipped {
+  opacity: 0.45;
+}
+
 label {
   margin-top: 8px;
   font-size: 12px;

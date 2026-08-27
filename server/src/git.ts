@@ -1,7 +1,12 @@
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { WORKSPACE_ROOT, type GitRuntime } from '../../protocol/index.ts';
+import {
+  ORACLE_PATHS,
+  WORKSPACE_ROOT,
+  type GitRuntime,
+} from '../../protocol/index.ts';
 
 export function createGitRuntime(fixtureDir: string): GitRuntime {
   async function createWorkspace(taskId: string) {
@@ -62,6 +67,9 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     // Only the homework file. `git add -A` also stages untracked fixture
     // extras (README.md) and pollutes the demo SHA.
     await runGit(dir, ['add', '--', 'parse.js']);
+    if (await isOracleDirty(dir)) {
+      throw new Error('ORACLE_TAMPERED: parse.test.js changed; refusing commit');
+    }
     const status = await runGit(dir, ['status', '--porcelain']);
     if (status.stdout.trim() === '') {
       return null;
@@ -76,11 +84,42 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return { sha, diff: diffResult.stdout };
   }
 
+  async function checkOracle(dir: string) {
+    const dirty = await isOracleDirty(dir);
+    return { dirty, oracleSha: oracleSha(dir) };
+  }
+
   async function resetAll() {
     fs.rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
   }
 
-  return { createWorkspace, runTests, getDiff, commitIfDirty, resetAll };
+  async function isOracleDirty(dir: string) {
+    for (const rel of ORACLE_PATHS) {
+      const current = path.join(dir, rel);
+      const baseline = path.join(fixtureDir, rel);
+      if (!fs.existsSync(current) || !fs.existsSync(baseline)) {
+        return true;
+      }
+      const left = fs.readFileSync(current);
+      const right = fs.readFileSync(baseline);
+      if (!left.equals(right)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function oracleSha(dir: string) {
+    const hash = createHash('sha256');
+    for (const rel of ORACLE_PATHS) {
+      const file = path.join(dir, rel);
+      hash.update(rel);
+      hash.update(fs.existsSync(file) ? fs.readFileSync(file) : Buffer.from(''));
+    }
+    return hash.digest('hex');
+  }
+
+  return { createWorkspace, runTests, getDiff, commitIfDirty, resetAll, checkOracle };
 }
 
 type SpawnResult = {

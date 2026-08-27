@@ -22,3 +22,5 @@ These files are the payloads. TypeScript names live in `../index.ts`.
 | `git-commit.result.json` | P2 → P1 | After `commitIfDirty` |
 | `cli-run.result.json` | P3 → P1 | After Claude/Codex process exits |
 | `loop-attempt2-prompt.txt` | P1 → P3 | Attempt 2 `run()` prompt |
+| `http-post-tasks-reviewer.request.json` | Phase C Launch | Writer + adversarial reviewer |
+| `review-ok.txt` / `review-reject.txt` | Reviewer CLI | Machine-readable verdict |

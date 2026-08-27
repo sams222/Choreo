@@ -4,3 +4,4 @@ dist/
 *.log
 /tmp/
 agent-tools/
+data/*.jsonl

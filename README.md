@@ -2,7 +2,11 @@
 
 [github.com/sams222/LoopSync](https://github.com/sams222/LoopSync) — local mission control for coding CLIs.
 
-Launch Claude Code or Codex against an isolated copy of a tiny homework repo. LoopSync runs `node --test`, feeds failures back, and git-commits **only if tests pass**. The agent never commits.
+Launch Claude or Codex against an isolated copy of a tiny homework repo. LoopSync is the orchestrator: it copies the fixture, runs a **writer** CLI, judges with `node --test` (the only SHA veto), optionally runs a **separate reviewer** process on green tests, and git-commits only if both gates pass. Coding agents never commit.
+
+Pick three roles on the dashboard: orchestrator (LoopSync, or a planner CLI), writer, reviewer. Same Launch JSON as before still works — omit `reviewerProvider` for writer + tests only.
+
+## Run locally
 
 Gemini CLI is out of scope (Google shut off individual Code Assist for that client). There is no fake adapter on the demo.
 

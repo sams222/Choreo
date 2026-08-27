@@ -18,6 +18,7 @@ export function createStubGit(): GitRuntime {
     runTests: gitNotWired,
     getDiff: gitNotWired,
     commitIfDirty: gitNotWired,
+    checkOracle: gitNotWired,
     resetAll: gitNotWired,
   };
 }

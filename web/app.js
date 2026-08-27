@@ -15,10 +15,18 @@ const MOCK_SUCCEEDED = {
       maxIterations: 2,
       workspaceDir: '/tmp/loopsync-workspaces/task_01hxyz',
       logs: [
-        '[loop] attempt 1/2 provider=codex',
-        '[codex] Updated parseIndex to return text.length.',
+        '[loop] attempt 1/2 writer=codex reviewer=claude',
+        '[writer] Updated parseIndex to return text.length.',
         '[tests] pass exit=0',
+        '[review] REVIEW_OK',
         '[git] committed 2e38bf1',
+      ],
+      reviewerProvider: 'claude',
+      steps: [
+        { id: 'writer', status: 'ok' },
+        { id: 'tests', status: 'ok' },
+        { id: 'review', status: 'ok' },
+        { id: 'git', status: 'ok' },
       ],
       diff: 'diff --git a/parse.js b/parse.js\n--- a/parse.js\n+++ b/parse.js\n@@ -1 +1 @@\n-export function parseIndex(text) { return text.length - 1; }\n+export function parseIndex(text) { return text.length; }\n',
       commitSha: '2e38bf1086d1d962ddbb5fd06b3970769d32c637',
@@ -44,6 +52,8 @@ const els = {
   title: document.getElementById('title'),
   prompt: document.getElementById('prompt'),
   provider: document.getElementById('provider'),
+  orchestratorProvider: document.getElementById('orchestratorProvider'),
+  reviewerProvider: document.getElementById('reviewerProvider'),
   formError: document.getElementById('formError'),
   launch: document.getElementById('launch'),
   cancel: document.getElementById('cancel'),
@@ -52,6 +62,8 @@ const els = {
   job: document.getElementById('job'),
   status: document.getElementById('status'),
   attempt: document.getElementById('attempt'),
+  rolesLine: document.getElementById('rolesLine'),
+  steps: document.getElementById('steps'),
   logs: document.getElementById('logs'),
   lastError: document.getElementById('lastError'),
   lastErrorWrap: document.getElementById('lastErrorWrap'),
@@ -88,9 +100,16 @@ function setHidden(el, hidden) {
 
 function applySlotBusy(slots) {
   const list = Array.isArray(slots) ? slots : [];
-  for (const option of els.provider.options) {
-    const slot = list.find((item) => item.provider === option.value);
-    option.disabled = Boolean(slot?.isBusy);
+  for (const select of [els.provider, els.reviewerProvider, els.orchestratorProvider]) {
+    if (!select) continue;
+    for (const option of select.options) {
+      if (!option.value) {
+        option.disabled = false;
+        continue;
+      }
+      const slot = list.find((item) => item.provider === option.value);
+      option.disabled = Boolean(slot?.isBusy);
+    }
   }
 }
 
@@ -108,6 +127,41 @@ function updateActions(task) {
   els.reset.disabled = !reachable;
 }
 
+function renderSteps(task) {
+  if (!els.steps) return;
+  els.steps.replaceChildren();
+  const steps = Array.isArray(task?.steps)
+    ? task.steps
+    : [
+        { id: 'writer', status: 'pending' },
+        { id: 'tests', status: 'pending' },
+        { id: 'review', status: 'skipped' },
+        { id: 'git', status: 'pending' },
+      ];
+  for (const step of steps) {
+    const li = document.createElement('li');
+    li.className = `step ${step.status}`;
+    li.textContent = `${step.id} ${step.status}`;
+    els.steps.append(li);
+  }
+}
+
+function rolesLine(task) {
+  const bits = [`writer ${task.provider}`];
+  if (task.orchestratorProvider) {
+    bits.unshift(`plan ${task.orchestratorProvider}`);
+  } else {
+    bits.unshift('orchestrator LoopSync');
+  }
+  if (task.reviewerProvider) {
+    bits.push(`reviewer ${task.reviewerProvider}`);
+  } else {
+    bits.push('reviewer none');
+  }
+  bits.push('oracle node --test');
+  return bits.join(' · ');
+}
+
 function render(snapshot) {
   const slots = snapshot?.slots ?? [];
   applySlotBusy(slots);
@@ -123,6 +177,8 @@ function render(snapshot) {
     els.status.textContent = '';
     els.status.className = 'badge';
     els.attempt.textContent = '';
+    if (els.rolesLine) els.rolesLine.textContent = '';
+    renderSteps(null);
     els.logs.textContent = '';
     els.lastError.textContent = '';
     els.diff.textContent = '';
@@ -141,6 +197,8 @@ function render(snapshot) {
   els.status.className = `badge ${status}`;
   els.status.textContent = STATUS_LABELS[status] ?? status;
   els.attempt.textContent = `Attempt ${task.currentIteration}/${task.maxIterations}`;
+  if (els.rolesLine) els.rolesLine.textContent = rolesLine(task);
+  renderSteps(task);
   els.logs.textContent = Array.isArray(task.logs) ? task.logs.join('\n') : '';
   els.logs.scrollTop = els.logs.scrollHeight;
 
@@ -205,6 +263,12 @@ els.form.addEventListener('submit', async (event) => {
         prompt: els.prompt.value,
         provider: els.provider.value,
         maxIterations: 2,
+        ...(els.reviewerProvider?.value
+          ? { reviewerProvider: els.reviewerProvider.value }
+          : {}),
+        ...(els.orchestratorProvider?.value
+          ? { orchestratorProvider: els.orchestratorProvider.value }
+          : {}),
       }),
     });
     if (!res.ok) {
@@ -255,6 +319,12 @@ els.reset.addEventListener('click', async () => {
 });
 
 els.provider.addEventListener('change', () => {
+  updateActions(lastTask);
+});
+els.reviewerProvider?.addEventListener('change', () => {
+  updateActions(lastTask);
+});
+els.orchestratorProvider?.addEventListener('change', () => {
   updateActions(lastTask);
 });
 

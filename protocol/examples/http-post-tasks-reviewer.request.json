@@ -1,0 +1,7 @@
+{
+  "title": "Fix Off-By-One Index in Array Parser",
+  "prompt": "The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.",
+  "provider": "codex",
+  "reviewerProvider": "claude",
+  "maxIterations": 2
+}

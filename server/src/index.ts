@@ -4,6 +4,7 @@ import { PORT } from '../../protocol/index.ts';
 import { createAdapters } from './adapters.ts';
 import { createGitRuntime } from './git.ts';
 import { createHttpApp } from './http.ts';
+import { createLedger, defaultLedgerPath } from './ledger.ts';
 import { createStore } from './state.ts';
 
 const fixtureDir = path.resolve(
@@ -14,8 +15,10 @@ const fixtureDir = path.resolve(
 const store = createStore();
 const git = createGitRuntime(fixtureDir);
 const adapters = createAdapters();
-const app = createHttpApp({ store, git, adapters });
+const ledger = createLedger(defaultLedgerPath());
+const app = createHttpApp({ store, git, adapters, ledger });
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`LoopSync listening on 0.0.0.0:${PORT}`);
+  console.log(`Ledger ${ledger.path}`);
 });
