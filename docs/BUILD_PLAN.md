@@ -109,6 +109,15 @@ Codex and Claude may run **sequentially** on the demo laptop (one job). Do not d
 
 **Gate 4:** three rehearsals without a hung CLI. Kill button works.
 
+### After Gate 2 — optional Phase C (2026 loop engineering)
+
+Do **not** start until Gate 2 is true (real `runLoop`, not queue-only Launch). Phase C wraps the kernel: locked oracle, independent writer / tests / review / git steps, caps, optional reviewer agent. It does not replace Tracks A–D.
+
+- Plan and file-by-file delta: [`PHASE_C.md`](PHASE_C.md)
+- Agent playbook: [`person-5-phase-c.md`](person-5-phase-c.md)
+
+Phases 0–4: `protocol/` is read-only. Phase C may **add** fields and examples only — never rename keys.
+
 ---
 
 ## Parallel graph (agents vs humans)
@@ -184,15 +193,15 @@ flowchart LR
   HTTP --> Web
 ```
 
-**Rule:** agents may write only their box. The Builder merges. `protocol/` is read-only.
+**Rule:** agents may write only their box. The Builder merges. `protocol/` is read-only in phases 0–4. Phase C ([`person-5-phase-c.md`](person-5-phase-c.md)) may add fields only.
 
 ---
 
 ## How the Builder launches agents
 
 1. One playbook per agent: attach `docs/person-*.md` + `protocol/index.ts` + `protocol/examples/`.
-2. Prompt: “Follow the playbook in order. Stop at the listed verify command. Do not edit protocol. Do not add Gemini or a fake adapter.”
-3. Max **two** code agents at once (Phase 1 only). Phase 2 is one adapter agent, then one loop agent.
+2. Prompt: “Follow the playbook in order. Stop at the listed verify command. Do not add Gemini or a fake adapter.” Phases 0–4: do not edit protocol. Phase C: additive protocol fields only (see [`person-5-phase-c.md`](person-5-phase-c.md)).
+3. Max **two** code agents at once (Phase 1 only). Phase 2 is one adapter agent, then one loop agent. Phase C is **one** agent at a time.
 4. After each agent: Builder runs that phase’s **debugger** commands, then `git push`.
 5. If two agents touch the same file, stop and serialize. They should not: playbooks isolate files.
 
@@ -225,3 +234,5 @@ phase:
 - Starting the dashboard before Gate 2
 - FakeAdapter on stage
 - Gemini
+- Phase C before Gate 2
+- Recursive CLI-spawned LoopSync loops (stretch; see [`PHASE_C.md`](PHASE_C.md))

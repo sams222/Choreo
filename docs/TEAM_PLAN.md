@@ -25,7 +25,7 @@ Both have already edited `/tmp/loopsync-smoke/parse.js` and made the test pass.
 
 **One Builder** drives Cursor agents and pushes `main`. Everyone else **debugs** (curl, CLIs, UI) or **plans the presentation**. The four “people” in the contracts are **agent tracks**, not four coders.
 
-Phased plan, gates, and parallel graphs: **[BUILD_PLAN.md](BUILD_PLAN.md)**.
+Phased plan, gates, and parallel graphs: **[BUILD_PLAN.md](BUILD_PLAN.md)**. After Gate 2, optional 2026 sequel: **[PHASE_C.md](PHASE_C.md)** (playbook **[person-5-phase-c.md](person-5-phase-c.md)**).
 
 ## Who owns what (agent tracks)
 
@@ -112,9 +112,12 @@ Presenters work from Phase 0. Debuggers own every gate.
 4. No Gemini. No fake adapter on stage.
 5. If a CLI hangs: Track C `AbortSignal` + 120s. Track D has Cancel.
 
+Rules 1 and 3 are the **demo kernel** through Gate 4. Phase C amends them: a scheduler may **enqueue** and start `runLoop` (not a second git/test/commit path); writer then reviewer may run **sequentially**. Tests remain the only SHA **veto**. See [PHASE_C.md](PHASE_C.md).
+
 Agent tracks:
 
 - [Track A — Orchestrator](person-1-orchestrator.md)
 - [Track B — Git & tests](person-2-git-runtime.md)
 - [Track C — CLI runners](person-3-cli-adapters.md)
 - [Track D — Dashboard & fixture](person-4-dashboard.md)
+- [Track E — Phase C](person-5-phase-c.md) — after Gate 2 only
