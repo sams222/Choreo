@@ -1,6 +1,8 @@
 # LoopSync
 
-Local mission-control for coding CLIs: launch Claude or Codex at an isolated copy of a tiny homework repo, run `node --test`, send failures back, commit only when tests pass.
+[github.com/sams222/LoopSync](https://github.com/sams222/LoopSync) — a platform for orchestrating CLI AI agents.
+
+Local mission-control: launch Claude or Codex at an isolated copy of a tiny homework repo, run `node --test`, send failures back, commit only when tests pass.
 
 Gemini CLI is not in scope (Google shut off individual Code Assist for that client). No fake agent on the demo.
 
@@ -26,6 +28,11 @@ codex exec --sandbox workspace-write --skip-git-repo-check "<task>"
 node --test
 ```
 
-## Run (after tomorrow’s build)
+## Clone
 
-Server on port **4055**. Exact start command lands when Person 1 scaffolds `server/`.
+```bash
+git clone https://github.com/sams222/LoopSync.git
+cd LoopSync
+```
+
+The `server/` and `web/` apps are not in this commit yet. Start from [docs/TEAM_PLAN.md](docs/TEAM_PLAN.md) and the playbooks in [docs/impl/](docs/impl/).
