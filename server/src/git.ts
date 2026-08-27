@@ -59,7 +59,9 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
       throw new Error('Never commit in original fixture/');
     }
 
-    await runGit(dir, ['add', '-A']);
+    // Only the homework file. `git add -A` also stages untracked fixture
+    // extras (README.md) and pollutes the demo SHA.
+    await runGit(dir, ['add', '--', 'parse.js']);
     const status = await runGit(dir, ['status', '--porcelain']);
     if (status.stdout.trim() === '') {
       return null;
