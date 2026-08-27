@@ -12,13 +12,20 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     }
     fs.cpSync(fixtureDir, dir, { recursive: true });
 
-    if (!fs.existsSync(path.join(dir, '.git'))) {
+    const hadGit = fs.existsSync(path.join(dir, '.git'));
+    if (!hadGit) {
       await runGit(dir, ['init']);
     }
-    await runGit(dir, ['checkout', '-b', `loopsync/${taskId}`]);
     await runGit(dir, ['config', 'user.email', 'loopsync@local']);
     await runGit(dir, ['config', 'user.name', 'LoopSync']);
     await runGit(dir, ['config', 'commit.gpgsign', 'false']);
+    if (!hadGit) {
+      await runGit(dir, ['add', 'parse.js', 'parse.test.js', 'package.json']);
+      await runGit(dir, ['commit', '-m', 'failing parseIndex', '--no-verify'], {
+        env: { GIT_EDITOR: 'true' },
+      });
+    }
+    await runGit(dir, ['checkout', '-b', `loopsync/${taskId}`]);
 
     if (
       !fs.existsSync(path.join(dir, 'parse.js')) ||
@@ -52,7 +59,9 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
       throw new Error('Never commit in original fixture/');
     }
 
-    await runGit(dir, ['add', '-A']);
+    // Only the homework file. `git add -A` also stages untracked fixture
+    // extras (README.md) and pollutes the demo SHA.
+    await runGit(dir, ['add', '--', 'parse.js']);
     const status = await runGit(dir, ['status', '--porcelain']);
     if (status.stdout.trim() === '') {
       return null;

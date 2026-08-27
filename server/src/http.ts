@@ -11,6 +11,7 @@ import type {
   LaunchTaskBody,
   ProviderType,
 } from '../../protocol/index.ts';
+import { runLoop } from './loop.ts';
 import type { Store } from './state.ts';
 
 const WEB_DIR = path.resolve(
@@ -69,7 +70,8 @@ export function createHttpApp(deps: {
   git: GitRuntime;
   adapters: Record<ProviderType, CLIAdapter>;
 }): Express {
-  const { store } = deps;
+  const { store, git, adapters } = deps;
+  const controllers = new Map<string, AbortController>();
   const app = express();
 
   app.use(express.json());
@@ -112,9 +114,20 @@ export function createHttpApp(deps: {
       return;
     }
 
-    // Phase 0: queue only. Do not setBusy and do not start runLoop.
+    store.setBusy(parsed.provider, true);
     const task = store.addTask(parsed);
+    const controller = new AbortController();
+    controllers.set(task.id, controller);
     res.status(201).json({ taskId: task.id });
+    void runLoop({
+      store,
+      git,
+      adapters,
+      taskId: task.id,
+      signal: controller.signal,
+    }).finally(() => {
+      controllers.delete(task.id);
+    });
   });
 
   app.post('/api/tasks/:id/cancel', (req, res) => {
@@ -123,10 +136,22 @@ export function createHttpApp(deps: {
       sendError(res, 404, 'TASK_NOT_FOUND', 'task not found');
       return;
     }
+    controllers.get(task.id)?.abort();
     res.status(200).json({ ok: true });
   });
 
-  app.post('/api/reset', (_req, res) => {
+  app.post('/api/reset', async (_req, res) => {
+    for (const controller of controllers.values()) {
+      controller.abort();
+    }
+    controllers.clear();
+    try {
+      await git.resetAll();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      sendError(res, 500, 'RESET_FAILED', message);
+      return;
+    }
     store.clear();
     res.status(200).json({ ok: true });
   });
