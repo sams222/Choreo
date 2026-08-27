@@ -1,94 +1,104 @@
 # Person 1 — Orchestrator & HTTP
 
-You own the product brain. If your loop is wrong, the demo is wrong even if git and CLIs work.
+You own the product brain. JSON you serve is under [`../protocol/examples/`](../protocol/examples/).
 
-## You own
+Bind **`0.0.0.0:4055`**. `Content-Type: application/json`. Person 4 polls `GET /api/state` every **300ms**. No Socket.IO.
 
-- In-memory list of `TaskState`
-- Function `runLoop(taskId)` that calls GitRuntime + CLIAdapter
-- HTTP server on **:4055**
-- Status transitions: queued → running → retrying → succeeded | failed
-- Appending logs when Person 3 calls `onLog`
+## HTTP table
 
-## You do not own
+| Status | Method | Path | Request JSON | Response JSON |
+|---|---|---|---|---|
+| 200 | GET | `/api/state` | — | `http-get-state-empty.json` or snapshot with `tasks[]` |
+| 201 | POST | `/api/tasks` | `http-post-tasks.request.json` | `http-post-tasks.response.json` `{ "taskId" }` |
+| 400 | POST | `/api/tasks` | missing fields / `provider: "gemini"` | `http-error-bad-request.json` |
+| 409 | POST | `/api/tasks` | same `provider` already `isBusy` | `http-post-tasks.error-slot-busy.json` |
+| 200 | POST | `/api/tasks/:id/cancel` | — | `{ "ok": true }` |
+| 404 | POST | `/api/tasks/:id/cancel` | unknown id | `{ "error": { "code": "TASK_NOT_FOUND", "message": "..." } }` |
+| 200 | POST | `/api/reset` | — | `{ "ok": true }` |
 
-- `git` commands, `node --test` implementation
-- Claude/Codex argv
-- React / CSS
+CORS: `http://127.0.0.1:4055`, `http://localhost:4055`, and Vite origin if Person 4 uses one (`http://127.0.0.1:4173` is fine if you add it). Allow `GET, POST, OPTIONS`.
 
-## You import
+`maxIterations` defaults to **2** if omitted. Reject any `provider` other than `"claude"` | `"codex"`.
 
-From `protocol/index.ts`: `TaskState`, `ServerSnapshot`, `LaunchTaskBody`, `CLIAdapter`, `GitRuntime`, `HTTP`.
+One job **per provider**. Two providers may run at once only if you have time; MVP is one task total.
 
-You receive **instances**:
+## `TaskState` you mutate (exact keys)
 
-```ts
-function createLoop(deps: {
-  git: GitRuntime;
-  adapters: Record<ProviderType, CLIAdapter>;
-}): { launch: ...; getSnapshot: ...; cancel: ...; reset: ... }
-```
+Copy shapes from:
 
-Person 2 gives you `git`. Person 3 gives you `adapters.claude` and `adapters.codex`.
+- queued → `task-queued.json` (`currentIteration: 0`, `workspaceDir: ""`, `logs: []`)
+- running → `task-running.json`
+- retrying → `task-retrying.json` (`lastError` = **Person 2 test output**, not CLI chat)
+- succeeded → `task-succeeded.json` (`diff` + `commitSha` required)
+- failed → `task-failed.json` (no `commitSha`)
 
-## HTTP you must serve (Person 4’s contract)
+`id` format: `task_` + lowercase unique suffix (cuid/ulid/random). Person 4 does not care as long as it is stable.
 
-| Method | Path | Body in | Body out |
-|---|---|---|---|
-| GET | `/api/state` | — | `ServerSnapshot` |
-| POST | `/api/tasks` | `LaunchTaskBody` | `{ "taskId": string }` |
-| POST | `/api/tasks/:id/cancel` | — | `{ "ok": true }` |
-| POST | `/api/reset` | — | `{ "ok": true }` |
-
-CORS: allow `http://127.0.0.1:4055` and `http://localhost:4055` (and Vite if Person 4 uses it).
-
-Polling is enough. Person 4 hits GET `/api/state` every 300ms. Optional: append-only log via that same snapshot (`task.logs`). Do not block on Socket.IO.
-
-## `runLoop` contract
-
-**In**
-
-- `taskId`
-- existing `TaskState` (prompt, provider, maxIterations)
-- `AbortSignal` for Cancel
-
-**Out (by mutating TaskState + snapshot)**
-
-- `logs[]` grow as `onLog` fires
-- `currentIteration` increments
-- `lastError` set from **test output**, not from CLI chatter
-- `diff` and `commitSha` set only after tests pass and Person 2 commits
-- `status` as above
-
-**Prompt for attempt 1:** `task.prompt`
-
-**Prompt for attempt 2+:**
+## `runLoop` implementation (do not invent a second one)
 
 ```
-${task.prompt}
+git.createWorkspace(taskId) → { dir, branch }
+task.workspaceDir = dir
+task.slots[provider].isBusy = true
 
-The tests failed. Fix the code, not the test. Do not ask questions. Do not git commit.
+for attempt from 1 to task.maxIterations:
+  task.currentIteration = attempt
+  task.status = attempt === 1 ? 'running' : 'retrying'
+  prompt = attempt === 1 ? task.prompt : retryPrompt(task.prompt, task.lastError)
+  log `[loop] attempt ${attempt}/${max} provider=${provider}`
+  cli = adapters[task.provider]
+  { output, exitCode } = await cli.run(dir, prompt, chunk => task.logs.push(chunk), signal)
+  log `[cli] exit=${exitCode}`
+  tests = await git.runTests(dir)
+  if tests.passed:
+    commit = await git.commitIfDirty(dir, `loopgrid: ${task.title}`)
+    task.diff = commit?.diff ?? (await git.getDiff(dir))
+    task.commitSha = commit?.sha
+    task.status = 'succeeded'
+    isBusy = false
+    return
+  task.lastError = tests.output
+  log `[tests] fail exit=${tests.exitCode}`
 
-TEST OUTPUT:
-${task.lastError}
+task.status = 'failed'
+isBusy = false
 ```
+
+Attempt 2 prompt file (byte-for-byte contract): [`../protocol/examples/loop-attempt2-prompt.txt`](../protocol/examples/loop-attempt2-prompt.txt)
+
+`retryPrompt()` is already in `protocol/index.ts`. Use it.
+
+On **cancel**: abort the `AbortSignal`, set `status: "failed"`, `lastError: "cancelled"`, `isBusy: false`. Still call nothing that commits.
+
+On **reset**: abort running work, `await git.resetAll()`, `tasks = []`, both slots `isBusy: false`. Return empty snapshot.
+
+## Logs
+
+Person 3 will `onLog` raw CLI text (Codex prints `OpenAI Codex v0.149.0`, `apply patch`, etc.). Prefix your own lines with `[loop]`, `[tests]`, `[git]`. Keep `logs` as an array of strings. If a chunk has newlines, split into multiple entries.
+
+Cap logs at ~500 lines (shift oldest) so the JSON snapshot stays small.
 
 ## Done when
 
-From curl or a tiny script, with Person 2 + 3 plugged in:
-
 ```bash
-curl -s -X POST http://127.0.0.1:4055/api/tasks \
+curl -s http://127.0.0.1:4055/api/state
+# → http-get-state-empty.json shape
+
+curl -s -D- -X POST http://127.0.0.1:4055/api/tasks \
   -H 'content-type: application/json' \
-  -d '{"title":"Fix off-by-one","prompt":"Make parseIndex pass parse.test.js. Do not change the test. Do not git commit.","provider":"codex","maxIterations":2}'
+  --data-binary @protocol/examples/http-post-tasks.request.json
+# → 201 { "taskId": "..." }
+
+# poll until status is succeeded or failed
 curl -s http://127.0.0.1:4055/api/state
 ```
 
-A task reaches `succeeded` with a `commitSha`, **or** `failed` with `lastError` after max iterations. Never stuck in `running` after the CLI exits.
+Succeeded must include `commitSha`. Failed must include `lastError`. Never leave `running` after both the CLI and tests have returned.
 
 ## Do not
 
-- Call `claude` / `codex` yourself
-- Call `git commit` yourself
-- Invent extra REST paths Person 4 is not using
-- Change protocol field names
+- Spawn `claude` / `codex`
+- `git commit`
+- Extra routes
+- Gemini
+- Socket.IO as a requirement

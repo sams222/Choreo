@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "SLOT_BUSY",
+    "message": "codex is already running a task"
+  }
+}

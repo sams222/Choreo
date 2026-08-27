@@ -1,0 +1,18 @@
+{
+  "id": "task_01hxyz",
+  "title": "Fix Off-By-One Index in Array Parser",
+  "prompt": "The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.",
+  "provider": "claude",
+  "status": "failed",
+  "currentIteration": 2,
+  "maxIterations": 2,
+  "workspaceDir": "/tmp/loopgrid-workspaces/task_01hxyz",
+  "logs": [
+    "[loop] attempt 1/2 provider=claude",
+    "[tests] fail exit=1",
+    "[loop] attempt 2/2 provider=claude",
+    "[tests] fail exit=1",
+    "[loop] giving up"
+  ],
+  "lastError": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n4 !== 5\n"
+}

@@ -1,78 +1,93 @@
 # Person 4 — Dashboard & fixture homework
 
-You own what judges look at, and the buggy homework the robots fix. You do not spawn CLIs.
+You own the buggy homework and the screen. You only speak HTTP JSON from [`../protocol/examples/`](../protocol/examples/).
 
-## You own
+Base URL: `http://127.0.0.1:4055`. Poll **300ms**.
 
-1. Fixture git repo (`fixture/`)
-2. One dashboard page
+## Fixture files (commit the failing version only)
 
-## Fixture contract (the homework)
+`fixture/package.json`
 
-**Files (only these needed):**
-
-- `parse.js` — buggy: `parseIndex` returns `text.length - 1`
-- `parse.test.js` — `assert.equal(parseIndex('abcde'), 5)` using `node:test`
-- `package.json` with `{ "type": "module" }` so ESM imports work
-- git initialized, one initial commit of the **buggy** state
-
-**Zero npm dependencies.** Person 2 runs `node --test` only.
-
-**Prompt text** Person 4 (or launcher defaults) should use:
-
-```
-The test in parse.test.js fails. Make parseIndex return the correct value so the test passes.
-Do not change the test. Do not ask questions. Do not run git commit.
+```json
+{ "type": "module" }
 ```
 
-**Done when (fixture):** in `fixture/`, `node --test` **fails** with `4 !== 5`. After a one-line fix to `return text.length`, it **passes**. Commit only the failing version.
+`fixture/parse.js`
 
-## Dashboard contract
+```js
+export function parseIndex(text) {
+  return text.length - 1;
+}
+```
 
-**Talk only to Person 1:**
+`fixture/parse.test.js`
 
-- `GET /api/state` → render `ServerSnapshot` (poll every 300ms)
-- `POST /api/tasks` with `LaunchTaskBody`
-- `POST /api/tasks/:id/cancel`
-- `POST /api/reset`
+```js
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parseIndex } from './parse.js';
 
-Until Person 1’s server exists, render [`../protocol/sample-snapshot.json`](../protocol/sample-snapshot.json) from a file so layout is not blocked. Swap to fetch when `/api/state` returns.
+test('length', () => {
+  assert.equal(parseIndex('abcde'), 5);
+});
+```
 
-### Screen
+`git init` inside `fixture/`, one commit of **this failing tree**. Zero npm deps. `node --test` must print `4 !== 5` and exit 1.
 
-**Left**
+Default Launch JSON (wire these as form defaults): [`http-post-tasks.request.json`](../protocol/examples/http-post-tasks.request.json)
 
-- Title (prefilled: Fix Off-By-One Index in Array Parser)
-- Prompt (prefilled as above)
-- Provider: `claude` | `codex` (no Gemini)
-- Launch
-- Reset
-- Cancel (active task)
+```json
+{
+  "title": "Fix Off-By-One Index in Array Parser",
+  "prompt": "The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.",
+  "provider": "codex",
+  "maxIterations": 2
+}
+```
 
-**Right**
+Provider `<select>` values: `codex` | `claude` only. No Gemini.
 
-- Status badge from `task.status` plus `Attempt {currentIteration}/{maxIterations}`
-- Log pane: `task.logs` (newest at bottom, auto-scroll)
-- `lastError` if present
-- Diff (`task.diff`) in a `<pre>`
-- Commit SHA when `task.commitSha` exists
+## HTTP you call
 
-### Empty / error
+| Button | Request | Success body | Error body |
+|---|---|---|---|
+| (interval) | `GET /api/state` | `{ "tasks": TaskState[], "slots": [...] }` | show “Cannot reach orchestrator on :4055” |
+| Launch | `POST /api/tasks` + request JSON above | `{ "taskId": "task_01hxyz" }` | 400 `http-error-bad-request.json` or 409 `http-post-tasks.error-slot-busy.json` |
+| Cancel | `POST /api/tasks/${taskId}/cancel` | `{ "ok": true }` | 404 TASK_NOT_FOUND |
+| Reset | `POST /api/reset` | `{ "ok": true }` | 500 RESET_FAILED |
 
-- No tasks: “No jobs yet. Launch a fix.”
-- `failed`: show lastError, do not show a success SHA
-- Fetch error: “Cannot reach orchestrator on :4055”
+Until Person 1 is up, render [`http-get-state-succeeded.json`](../protocol/examples/http-get-state-succeeded.json) or [`sample-snapshot.json`](../sample-snapshot.json) from disk. That is layout data, not a fake agent.
 
-Desktop and a narrow mobile column (stack left/right).
+## How to paint `TaskState`
+
+| `status` | Badge | Extra |
+|---|---|---|
+| `queued` | Queued | Attempt 0/N |
+| `running` | Running | `Attempt {currentIteration}/{maxIterations}` |
+| `retrying` | Retrying | show `lastError` (the `4 !== 5` TAP) |
+| `succeeded` | Succeeded | **must** show `commitSha` + `<pre>` `diff` |
+| `failed` | Failed | show `lastError`, hide SHA |
+
+`slots[].isBusy` can disable that provider in the dropdown.
+
+Log pane: join `task.logs` with newlines, auto-scroll. Newest at bottom.
+
+Empty `tasks[]`: “No jobs yet. Launch a fix.”
+
+## Layout
+
+Left: title, prompt textarea, provider, Launch, Reset, Cancel.  
+Right: badge, logs, lastError, diff, SHA.  
+Narrow viewport: stack.
 
 ## Done when
 
-1. Fixture fails then passes as specified
-2. UI can launch a task (or show snapshot mock)
-3. After Person 1 is up: Reset → Launch → see logs move → see Succeeded + SHA **or** Failed + error
+1. `cd fixture && node --test` fails with `4 !== 5`
+2. UI Launch sends **exactly** the request JSON keys (`title`, `prompt`, `provider`, `maxIterations`)
+3. Live: Reset → Launch → logs move → Succeeded+SHA or Failed+error
 
 ## Do not
 
-- Call `claude` / `codex` / `git` from the browser
-- Invent JSON fields not in `TaskState`
-- Build a fake agent to drive the UI; use the sample snapshot for layout only
+- Fetch git or spawn CLIs from the browser
+- Extra JSON fields
+- Gemini option

@@ -13,7 +13,9 @@ Gemini CLI is not in scope (Google shut off individual Code Assist for that clie
 - **[docs/person-4-dashboard.md](docs/person-4-dashboard.md)** — UI + fixture homework
 
 **Frozen types:** [protocol/index.ts](protocol/index.ts)  
-**UI mock snapshot:** [protocol/sample-snapshot.json](protocol/sample-snapshot.json)
+**JSON payloads:** [protocol/examples/](protocol/examples/)  
+**UI mock snapshot:** [protocol/sample-snapshot.json](protocol/sample-snapshot.json)  
+**Homework:** [fixture/](fixture/) (`node --test` must fail with `4 !== 5`)
 
 ## Already proven on the demo laptop
 

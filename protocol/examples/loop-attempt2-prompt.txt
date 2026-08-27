@@ -1,0 +1,17 @@
+The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.
+
+The tests failed. Fix the code, not the test. Do not ask questions. Do not git commit.
+
+TEST OUTPUT:
+TAP version 13
+# Subtest: length
+not ok 1 - length
+  ---
+  error: |-
+    Expected values to be strictly equal:
+    
+    4 !== 5
+  name: 'AssertionError'
+  expected: 5
+  actual: 4
+  operator: 'strictEqual'

@@ -1,7 +1,7 @@
 /**
  * LOOPGRID FROZEN PROTOCOL
  * Do not change field names without a team shout in the group chat.
- * Everyone copies or imports this file. Person 1, 2, 3, 4 all code against it.
+ * JSON examples live in protocol/examples/. Person 1–4 all code against this file.
  */
 
 export type ProviderType = 'claude' | 'codex';
@@ -28,14 +28,35 @@ export interface TaskState {
   commitSha?: string;
 }
 
+export interface ProviderSlot {
+  provider: ProviderType;
+  isBusy: boolean;
+}
+
 export interface ServerSnapshot {
   tasks: TaskState[];
-  slots: { provider: ProviderType; isBusy: boolean }[];
+  slots: ProviderSlot[];
 }
 
 export interface RunResult {
   output: string;
   exitCode: number;
+}
+
+export interface TestResult {
+  passed: boolean;
+  output: string;
+  exitCode: number;
+}
+
+export interface WorkspaceHandle {
+  dir: string;
+  branch: string;
+}
+
+export interface CommitResult {
+  sha: string;
+  diff: string;
 }
 
 /** Person 3 implements. Person 1 calls. */
@@ -51,20 +72,13 @@ export interface CLIAdapter {
 
 /** Person 2 implements. Person 1 calls. */
 export interface GitRuntime {
-  createWorkspace(taskId: string): Promise<{ dir: string; branch: string }>;
-  runTests(dir: string): Promise<{ passed: boolean; output: string }>;
+  createWorkspace(taskId: string): Promise<WorkspaceHandle>;
+  runTests(dir: string): Promise<TestResult>;
   getDiff(dir: string): Promise<string>;
-  commitIfDirty(
-    dir: string,
-    message: string,
-  ): Promise<{ sha: string; diff: string } | null>;
+  commitIfDirty(dir: string, message: string): Promise<CommitResult | null>;
   resetAll(): Promise<void>;
 }
 
-/**
- * HTTP contract (Person 1 serves, Person 4 consumes).
- * Poll GET /api/state every 300ms. Do not require Socket.IO.
- */
 export interface LaunchTaskBody {
   title: string;
   prompt: string;
@@ -76,6 +90,38 @@ export interface LaunchTaskResponse {
   taskId: string;
 }
 
+export interface OkResponse {
+  ok: true;
+}
+
+export type ErrorCode =
+  | 'BAD_REQUEST'
+  | 'UNKNOWN_PROVIDER'
+  | 'SLOT_BUSY'
+  | 'TASK_NOT_FOUND'
+  | 'RESET_FAILED';
+
+export interface ErrorResponse {
+  error: {
+    code: ErrorCode;
+    message: string;
+  };
+}
+
+export const PORT = 4055;
+export const POLL_MS = 300;
+export const CLI_TIMEOUT_MS = 120_000;
+export const DEFAULT_MAX_ITERATIONS = 2;
+export const WORKSPACE_ROOT = '/tmp/loopgrid-workspaces';
+
+export const DEFAULT_LAUNCH: LaunchTaskBody = {
+  title: 'Fix Off-By-One Index in Array Parser',
+  prompt:
+    'The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.',
+  provider: 'codex',
+  maxIterations: 2,
+};
+
 export const HTTP = {
   getState: 'GET /api/state',
   launch: 'POST /api/tasks',
@@ -83,7 +129,7 @@ export const HTTP = {
   reset: 'POST /api/reset',
 } as const;
 
-/** Proven argv. Person 3 must use these unless the group agrees otherwise. */
+/** Proven argv on the demo laptop. Person 3 must use these. */
 export const PROVIDER_COMMANDS = {
   claude: {
     bin: 'claude',
@@ -106,3 +152,12 @@ export const PROVIDER_COMMANDS = {
     ],
   },
 } as const;
+
+export function retryPrompt(originalPrompt: string, testOutput: string): string {
+  return `${originalPrompt}
+
+The tests failed. Fix the code, not the test. Do not ask questions. Do not git commit.
+
+TEST OUTPUT:
+${testOutput}`;
+}

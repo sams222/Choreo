@@ -34,11 +34,14 @@ Both have already edited `/tmp/loopgrid-smoke/parse.js` and made the test pass.
 
 ## Frozen contract
 
-Source of truth: [`../protocol/index.ts`](../protocol/index.ts)
+- Types: [`../protocol/index.ts`](../protocol/index.ts)
+- Every HTTP / task / git / CLI payload: [`../protocol/examples/`](../protocol/examples/)
 
-Do not rename fields. If you need a field, shout in the group chat first.
+Do not rename JSON keys. If you need a field, shout in the group chat first.
 
-Person 4 may build the UI against [`../protocol/sample-snapshot.json`](../protocol/sample-snapshot.json). That is a **picture of state**, not a fake agent.
+Person 4 may build the UI against `protocol/examples/http-get-state-succeeded.json`. That is a **picture of state**, not a fake agent.
+
+Constants already in protocol: port **4055**, poll **300ms**, CLI timeout **120s**, workspaces `/tmp/loopgrid-workspaces`, default `maxIterations` **2**.
 
 ## Suggested folders
 

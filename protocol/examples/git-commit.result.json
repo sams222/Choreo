@@ -1,0 +1,4 @@
+{
+  "sha": "2e38bf1086d1d962ddbb5fd06b3970769d32c637",
+  "diff": "diff --git a/parse.js b/parse.js\nindex 1008b54..2e38bf1 100644\n--- a/parse.js\n+++ b/parse.js\n@@ -1 +1 @@\n-export function parseIndex(text) { return text.length - 1; }\n+export function parseIndex(text) { return text.length; }\n"
+}

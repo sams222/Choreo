@@ -5,20 +5,22 @@
       "title": "Fix Off-By-One Index in Array Parser",
       "prompt": "The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.",
       "provider": "codex",
-      "status": "retrying",
-      "currentIteration": 2,
+      "status": "succeeded",
+      "currentIteration": 1,
       "maxIterations": 2,
       "workspaceDir": "/tmp/loopgrid-workspaces/task_01hxyz",
       "logs": [
         "[loop] attempt 1/2 provider=codex",
-        "[tests] fail exit=1",
-        "[loop] injecting test output into attempt 2"
+        "[codex] Updated parseIndex to return text.length.",
+        "[tests] pass exit=0",
+        "[git] committed 2e38bf1"
       ],
-      "lastError": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n4 !== 5"
+      "diff": "diff --git a/parse.js b/parse.js\n--- a/parse.js\n+++ b/parse.js\n@@ -1 +1 @@\n-export function parseIndex(text) { return text.length - 1; }\n+export function parseIndex(text) { return text.length; }\n",
+      "commitSha": "2e38bf1086d1d962ddbb5fd06b3970769d32c637"
     }
   ],
   "slots": [
     { "provider": "claude", "isBusy": false },
-    { "provider": "codex", "isBusy": true }
+    { "provider": "codex", "isBusy": false }
   ]
 }

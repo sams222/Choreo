@@ -1,0 +1,7 @@
+{
+  "tasks": [],
+  "slots": [
+    { "provider": "claude", "isBusy": false },
+    { "provider": "codex", "isBusy": false }
+  ]
+}

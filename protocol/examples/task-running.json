@@ -1,0 +1,16 @@
+{
+  "id": "task_01hxyz",
+  "title": "Fix Off-By-One Index in Array Parser",
+  "prompt": "The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.",
+  "provider": "codex",
+  "status": "running",
+  "currentIteration": 1,
+  "maxIterations": 2,
+  "workspaceDir": "/tmp/loopgrid-workspaces/task_01hxyz",
+  "logs": [
+    "[loop] workspace /tmp/loopgrid-workspaces/task_01hxyz branch loopgrid/task_01hxyz",
+    "[loop] attempt 1/2 provider=codex",
+    "[codex] OpenAI Codex v0.149.0",
+    "[codex] sandbox: workspace-write"
+  ]
+}
