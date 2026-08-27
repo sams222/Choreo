@@ -6,7 +6,7 @@
   "status": "succeeded",
   "currentIteration": 2,
   "maxIterations": 2,
-  "workspaceDir": "/tmp/loopgrid-workspaces/task_01hxyz",
+  "workspaceDir": "/tmp/loopsync-workspaces/task_01hxyz",
   "logs": [
     "[loop] attempt 2/2 provider=codex",
     "[codex] Updated parseIndex to return text.length.",

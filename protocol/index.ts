@@ -112,7 +112,7 @@ export const PORT = 4055;
 export const POLL_MS = 300;
 export const CLI_TIMEOUT_MS = 120_000;
 export const DEFAULT_MAX_ITERATIONS = 2;
-export const WORKSPACE_ROOT = '/tmp/loopgrid-workspaces';
+export const WORKSPACE_ROOT = '/tmp/loopsync-workspaces';
 
 export const DEFAULT_LAUNCH: LaunchTaskBody = {
   title: 'Fix Off-By-One Index in Array Parser',

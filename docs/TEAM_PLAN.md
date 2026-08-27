@@ -1,4 +1,4 @@
-# LoopGrid — team plan for tomorrow
+# LoopSync — team plan for tomorrow
 
 ## What we are building
 
@@ -19,7 +19,7 @@ codex exec --sandbox workspace-write --skip-git-repo-check "<task>"
 node --test
 ```
 
-Both have already edited `/tmp/loopgrid-smoke/parse.js` and made the test pass.
+Both have already edited `/tmp/loopsync-smoke/parse.js` and made the test pass.
 
 ## Who owns what
 
@@ -41,7 +41,7 @@ Do not rename JSON keys. If you need a field, shout in the group chat first.
 
 Person 4 may build the UI against `protocol/examples/http-get-state-succeeded.json`. That is a **picture of state**, not a fake agent.
 
-Constants already in protocol: port **4055**, poll **300ms**, CLI timeout **120s**, workspaces `/tmp/loopgrid-workspaces`, default `maxIterations` **2**.
+Constants already in protocol: port **4055**, poll **300ms**, CLI timeout **120s**, workspaces `/tmp/loopsync-workspaces`, default `maxIterations` **2**.
 
 ## Suggested folders
 

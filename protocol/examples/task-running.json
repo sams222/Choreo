@@ -6,9 +6,9 @@
   "status": "running",
   "currentIteration": 1,
   "maxIterations": 2,
-  "workspaceDir": "/tmp/loopgrid-workspaces/task_01hxyz",
+  "workspaceDir": "/tmp/loopsync-workspaces/task_01hxyz",
   "logs": [
-    "[loop] workspace /tmp/loopgrid-workspaces/task_01hxyz branch loopgrid/task_01hxyz",
+    "[loop] workspace /tmp/loopsync-workspaces/task_01hxyz branch loopsync/task_01hxyz",
     "[loop] attempt 1/2 provider=codex",
     "[codex] OpenAI Codex v0.149.0",
     "[codex] sandbox: workspace-write"

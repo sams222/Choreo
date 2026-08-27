@@ -1,4 +1,4 @@
-# LoopGrid
+# LoopSync
 
 Local mission-control for coding CLIs: launch Claude or Codex at an isolated copy of a tiny homework repo, run `node --test`, send failures back, commit only when tests pass.
 

@@ -51,7 +51,7 @@ for attempt from 1 to task.maxIterations:
   log `[cli] exit=${exitCode}`
   tests = await git.runTests(dir)
   if tests.passed:
-    commit = await git.commitIfDirty(dir, `loopgrid: ${task.title}`)
+    commit = await git.commitIfDirty(dir, `loopsync: ${task.title}`)
     task.diff = commit?.diff ?? (await git.getDiff(dir))
     task.commitSha = commit?.sha
     task.status = 'succeeded'

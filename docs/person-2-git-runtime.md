@@ -2,7 +2,7 @@
 
 You own the homework copy, `node --test`, and the commit SHA. JSON you return is under [`../protocol/examples/`](../protocol/examples/).
 
-Fixture path in: **`fixture/`** (Person 4). Workspaces out: **`/tmp/loopgrid-workspaces/<taskId>`**. No git worktrees.
+Fixture path in: **`fixture/`** (Person 4). Workspaces out: **`/tmp/loopsync-workspaces/<taskId>`**. No git worktrees.
 
 Export one object that matches `GitRuntime`.
 
@@ -10,22 +10,22 @@ Export one object that matches `GitRuntime`.
 
 ```json
 {
-  "dir": "/tmp/loopgrid-workspaces/task_01hxyz",
-  "branch": "loopgrid/task_01hxyz"
+  "dir": "/tmp/loopsync-workspaces/task_01hxyz",
+  "branch": "loopsync/task_01hxyz"
 }
 ```
 
 Implementation details:
 
-- `fs.mkdir` `WORKSPACE_ROOT` (`/tmp/loopgrid-workspaces`)
+- `fs.mkdir` `WORKSPACE_ROOT` (`/tmp/loopsync-workspaces`)
 - Copy Person 4’s `fixture/` recursively into `dir` (`fs.cpSync(src, dir, { recursive: true })`). Skip copying `fixture/.git` if clone is easier: `git clone --local <abs-fixture> <dir>` is also fine.
 - `dir` must be a git repo when you return. If you copied without `.git`, `git init` then you lose history — prefer clone or copy including `.git`.
-- `git -C dir checkout -b loopgrid/<taskId>`
+- `git -C dir checkout -b loopsync/<taskId>`
 - Set identity so commit cannot open an editor:
 
 ```bash
-git -C "$dir" config user.email loopgrid@local
-git -C "$dir" config user.name LoopGrid
+git -C "$dir" config user.email loopsync@local
+git -C "$dir" config user.name LoopSync
 git -C "$dir" config commit.gpgsign false
 ```
 
@@ -91,7 +91,7 @@ Steps: `git add -A` → if `git status --porcelain` empty, return `null` → `gi
 
 ## `resetAll()` → void (Person 1 does not need a JSON body)
 
-Delete `/tmp/loopgrid-workspaces` recursively (`fs.rmSync(root, { recursive: true, force: true })`). Do not touch `fixture/`.
+Delete `/tmp/loopsync-workspaces` recursively (`fs.rmSync(root, { recursive: true, force: true })`). Do not touch `fixture/`.
 
 ## Isolated done-when (no Claude/Codex)
 
