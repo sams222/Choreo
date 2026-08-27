@@ -3,20 +3,40 @@ import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
+  DEFAULT_TEST_COMMAND,
   ORACLE_PATHS,
   WORKSPACE_ROOT,
   type GitRuntime,
   type OutputFile,
+  type WorkspaceContext,
 } from '../../protocol/index.ts';
 
 export function createGitRuntime(fixtureDir: string): GitRuntime {
-  async function createWorkspace(taskId: string) {
+  function resolveCtx(ctx?: WorkspaceContext) {
+    const sourceDir = path.resolve(ctx?.sourceDir ?? fixtureDir);
+    const oraclePaths = [...(ctx?.oraclePaths ?? ORACLE_PATHS)];
+    const testCommand = [...(ctx?.testCommand ?? DEFAULT_TEST_COMMAND)];
+    const persistDir = ctx?.persistDir
+      ? path.resolve(ctx.persistDir)
+      : undefined;
+    return { sourceDir, oraclePaths, testCommand, persistDir };
+  }
+
+  async function createWorkspace(taskId: string, ctx?: WorkspaceContext) {
+    const { sourceDir, persistDir } = resolveCtx(ctx);
     fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
-    const dir = path.join(WORKSPACE_ROOT, taskId);
-    if (fs.existsSync(dir)) {
-      fs.rmSync(dir, { recursive: true, force: true });
+    const dir = persistDir ?? path.join(WORKSPACE_ROOT, taskId);
+    const reusing =
+      Boolean(persistDir) &&
+      fs.existsSync(dir) &&
+      fs.readdirSync(dir).some((name) => name !== '.git');
+
+    if (!reusing) {
+      if (fs.existsSync(dir)) {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+      fs.cpSync(sourceDir, dir, { recursive: true });
     }
-    fs.cpSync(fixtureDir, dir, { recursive: true });
 
     const hadGit = fs.existsSync(path.join(dir, '.git'));
     if (!hadGit) {
@@ -26,25 +46,41 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     await runGit(dir, ['config', 'user.name', 'LoopSync']);
     await runGit(dir, ['config', 'commit.gpgsign', 'false']);
     if (!hadGit) {
-      await runGit(dir, ['add', 'parse.js', 'parse.test.js', 'package.json']);
-      await runGit(dir, ['commit', '-m', 'failing parseIndex', '--no-verify'], {
-        env: { GIT_EDITOR: 'true' },
-      });
+      if (persistDir || ctx?.sourceDir) {
+        await runGit(dir, ['add', '-A']);
+        await runGit(
+          dir,
+          ['commit', '-m', 'loopsync baseline', '--no-verify'],
+          { env: { GIT_EDITOR: 'true' } },
+        );
+      } else {
+        await runGit(dir, ['add', 'parse.js', 'parse.test.js', 'package.json']);
+        await runGit(dir, ['commit', '-m', 'failing parseIndex', '--no-verify'], {
+          env: { GIT_EDITOR: 'true' },
+        });
+      }
     }
-    await runGit(dir, ['checkout', '-b', `loopsync/${taskId}`]);
+    await runGit(dir, ['checkout', '-B', `loopsync/${taskId}`]);
 
-    if (
-      !fs.existsSync(path.join(dir, 'parse.js')) ||
-      !fs.existsSync(path.join(dir, 'parse.test.js'))
-    ) {
-      throw new Error('parse.js or parse.test.js missing');
+    if (!ctx?.sourceDir && !persistDir) {
+      if (
+        !fs.existsSync(path.join(dir, 'parse.js')) ||
+        !fs.existsSync(path.join(dir, 'parse.test.js'))
+      ) {
+        throw new Error('parse.js or parse.test.js missing');
+      }
     }
 
     return { dir, branch: `loopsync/${taskId}` };
   }
 
-  async function runTests(dir: string) {
-    const { output, exitCode } = await run('node', ['--test'], dir);
+  async function runTests(dir: string, ctx?: WorkspaceContext) {
+    const { testCommand } = resolveCtx(ctx);
+    const [bin, ...args] = testCommand;
+    if (!bin) {
+      throw new Error('testCommand is empty');
+    }
+    const { output, exitCode } = await run(bin, args, dir);
     return { passed: exitCode === 0, exitCode, output };
   }
 
@@ -58,21 +94,31 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return cached.stdout;
   }
 
-  async function commitIfDirty(dir: string, message: string) {
+  async function commitIfDirty(
+    dir: string,
+    message: string,
+    ctx?: WorkspaceContext,
+  ) {
+    const { sourceDir, oraclePaths } = resolveCtx(ctx);
     const resolved = path.resolve(dir);
     const fixture = path.resolve(fixtureDir);
     if (resolved === fixture || resolved.startsWith(fixture + path.sep)) {
       throw new Error('Never commit in original fixture/');
     }
-
-    if (await isOracleDirty(dir)) {
-      throw new Error('ORACLE_TAMPERED: parse.test.js changed; refusing commit');
+    if (resolved === sourceDir || resolved.startsWith(sourceDir + path.sep)) {
+      throw new Error('Never commit in original source directory');
     }
-    const skip = new Set<string>([...ORACLE_PATHS, 'README.md']);
+
+    if (await isOracleDirty(dir, ctx)) {
+      throw new Error(
+        `ORACLE_TAMPERED: ${oraclePaths.join(', ')} changed; refusing commit`,
+      );
+    }
+    const skip = new Set<string>([...oraclePaths, 'README.md']);
     const status = await runGit(dir, ['status', '--porcelain']);
     const rels = status.stdout
       .split('\n')
-      .map((line) => line.slice(3).trim())
+      .map((line) => porcelainPath(line))
       .filter((rel) => rel && !skip.has(rel) && !rel.startsWith('.git'));
     if (rels.length === 0) {
       return null;
@@ -88,14 +134,22 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return { sha, diff: diffResult.stdout };
   }
 
-  async function listOutputs(dir: string): Promise<OutputFile[]> {
-    const skip = new Set<string>([...ORACLE_PATHS, 'README.md', 'package.json']);
+  async function listOutputs(
+    dir: string,
+    ctx?: WorkspaceContext,
+  ): Promise<OutputFile[]> {
+    const { sourceDir, oraclePaths } = resolveCtx(ctx);
+    const skip = new Set<string>([
+      ...oraclePaths,
+      'README.md',
+      'package.json',
+    ]);
     const files: OutputFile[] = [];
     walk(dir, '', (rel, abs) => {
       if (skip.has(rel) || rel.startsWith('.git')) {
         return;
       }
-      const baseline = path.join(fixtureDir, rel);
+      const baseline = path.join(sourceDir, rel);
       const content = fs.readFileSync(abs, 'utf8');
       if (content.length > 80_000) {
         return;
@@ -111,19 +165,20 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return files.sort((a, b) => a.path.localeCompare(b.path));
   }
 
-  async function checkOracle(dir: string) {
-    const dirty = await isOracleDirty(dir);
-    return { dirty, oracleSha: oracleSha(dir) };
+  async function checkOracle(dir: string, ctx?: WorkspaceContext) {
+    const dirty = await isOracleDirty(dir, ctx);
+    return { dirty, oracleSha: oracleSha(dir, ctx) };
   }
 
   async function resetAll() {
     fs.rmSync(WORKSPACE_ROOT, { recursive: true, force: true });
   }
 
-  async function isOracleDirty(dir: string) {
-    for (const rel of ORACLE_PATHS) {
+  async function isOracleDirty(dir: string, ctx?: WorkspaceContext) {
+    const { sourceDir, oraclePaths } = resolveCtx(ctx);
+    for (const rel of oraclePaths) {
       const current = path.join(dir, rel);
-      const baseline = path.join(fixtureDir, rel);
+      const baseline = path.join(sourceDir, rel);
       if (!fs.existsSync(current) || !fs.existsSync(baseline)) {
         return true;
       }
@@ -136,9 +191,10 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return false;
   }
 
-  function oracleSha(dir: string) {
+  function oracleSha(dir: string, ctx?: WorkspaceContext) {
+    const { oraclePaths } = resolveCtx(ctx);
     const hash = createHash('sha256');
-    for (const rel of ORACLE_PATHS) {
+    for (const rel of oraclePaths) {
       const file = path.join(dir, rel);
       hash.update(rel);
       hash.update(fs.existsSync(file) ? fs.readFileSync(file) : Buffer.from(''));
@@ -146,7 +202,23 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return hash.digest('hex');
   }
 
-  return { createWorkspace, runTests, getDiff, commitIfDirty, resetAll, checkOracle, listOutputs };
+  return {
+    createWorkspace,
+    runTests,
+    getDiff,
+    commitIfDirty,
+    resetAll,
+    checkOracle,
+    listOutputs,
+  };
+}
+
+function porcelainPath(line: string): string {
+  const raw = line.slice(3).trim();
+  if (raw.includes(' -> ')) {
+    return raw.slice(raw.lastIndexOf(' -> ') + 4);
+  }
+  return raw.replace(/^"|"$/g, '');
 }
 
 function walk(
@@ -175,6 +247,12 @@ function walk(
   }
 }
 
+function spawnEnv(extraEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env = extraEnv ? { ...process.env, ...extraEnv } : { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  return env;
+}
+
 type SpawnResult = {
   stdout: string;
   stderr: string;
@@ -192,7 +270,7 @@ function run(
     const child = spawn(command, args, {
       cwd,
       shell: false,
-      env: extraEnv ? { ...process.env, ...extraEnv } : process.env,
+      env: spawnEnv(extraEnv),
     });
     let stdout = '';
     let stderr = '';

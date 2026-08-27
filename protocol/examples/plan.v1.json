@@ -1,0 +1,11 @@
+{
+  "reply": "Implement integerSqrt in sqrt.js. Leave sqrt.test.js locked.",
+  "items": [
+    {
+      "title": "Implement integerSqrt",
+      "files": ["sqrt.js"],
+      "doneWhen": "integerSqrt(9) === 3",
+      "prompt": "Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js. Do not run git commit."
+    }
+  ]
+}

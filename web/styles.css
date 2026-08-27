@@ -145,6 +145,138 @@ textarea {
   margin-top: 8px;
 }
 
+.oracle-chip,
+.source-readout {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.oracle-chip {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--warn);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source-readout {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
+
+.thread {
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 42vh;
+  overflow: auto;
+}
+
+.msg {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--raised);
+}
+
+.msg .who {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.msg p {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.msg.user {
+  border-color: #2c4a3d;
+}
+
+.msg.user .who {
+  color: var(--accent);
+}
+
+.msg.orchestrator .who {
+  color: var(--info);
+}
+
+.plan-list {
+  margin: 0 0 16px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+
+.plan-item .mark {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+
+.plan-item.running .mark {
+  border-color: var(--info);
+  background: #1a3348;
+}
+
+.plan-item.succeeded .mark {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.plan-item.failed .mark {
+  border-color: var(--danger);
+  background: var(--danger);
+}
+
+.plan-item h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.plan-item .meta {
+  grid-column: 2;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+#follow-form {
+  margin-top: 18px;
+}
+
+#followup {
+  min-height: 96px;
+}
+
 .actions {
   display: flex;
   gap: 8px;

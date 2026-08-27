@@ -114,7 +114,9 @@ Each phase has a gate. Do not start the next until the gate is true. UI polish c
 
 **UI:** “Open folder” / paste a path. Goal box. Oracle command shown as a locked chip. Code pane already exists.
 
-**Gate D:** User launches “add `integer_sqrt` in `sqrt.py`” against a tiny Python tree whose tests assert `integer_sqrt(9) == 3`. SHA contains `sqrt.py`. `parse.js` is never touched. Editing the pytest file still yields `ORACLE_TAMPERED`.
+**Gate D:** User launches “add `integerSqrt` in `sqrt.js`” against `examples/sqrt`, whose tests assert `integerSqrt(9) === 3`. SHA contains `sqrt.js`. `parse.js` is never touched. Editing `sqrt.test.js` still yields `ORACLE_TAMPERED`. (Shipped with `node --test`, not pytest.)
+
+**Status:** shipped. `POST /api/projects` + per-project `sourceDir` / `testCommand` / `oraclePaths`. Persistent workspace at `/tmp/loopsync-workspaces/<projId>` (not recopied on follow-up). Gate 2 `POST /api/tasks` without `projectId` still copies `fixture/`.
 
 ### Phase E — Plan as an object, plus a steering thread
 
@@ -136,6 +138,8 @@ Each phase has a gate. Do not start the next until the gate is true. UI polish c
 
 1. Two-item plan; item 1 done before item 2 starts.
 2. After item 1’s files are visible, user sends “switch the algorithm to binary search.” Orchestrator replies in the thread, the item re-runs, Code pane updates. No Reset. Oracle still has to pass.
+
+**Status:** steering thread shipped (`POST /api/projects/:id/messages`, checklist, persistDir reuse). Planner JSON is `protocol/examples/plan.v1.json`. Human delete/reorder/freeze of items is still open. Sending while a run is in flight returns `SLOT_BUSY` (Stop, then Send).
 
 Do **not** let an LLM rewrite the oracle in this phase. Do **not** implement chat-as-writer (one model that plans, codes, and reviews in the same window).
 

@@ -1,6 +1,9 @@
 import {
+  parsePlanObject,
   parseReviewVerdict,
+  planObjectPrompt,
   planPrompt,
+  projectWriterPrompt,
   reviewPrompt,
   reviewRetryPrompt,
   retryPrompt,
@@ -11,7 +14,9 @@ import {
   type StepId,
   type StepState,
   type StepStatus,
+  type TaskState,
   type TimelineEvent,
+  type WorkspaceContext,
 } from '../../protocol/index.ts';
 import { extractUsefulCliText, isCliNoise } from './cli-log.ts';
 import type { Ledger } from './ledger.ts';
@@ -80,6 +85,8 @@ async function executeLoop(opts: {
     reviewerProvider,
     orchestratorProvider,
   } = initial;
+  const ctx = jobContext(initial);
+  const oracleLabel = (ctx?.oraclePaths ?? ['parse.test.js']).join(', ');
 
   const record = (
     event: string,
@@ -96,14 +103,15 @@ async function executeLoop(opts: {
 
   let workspaceDir = '';
   try {
-    const workspace = await git.createWorkspace(taskId);
+    const workspace = await git.createWorkspace(taskId, ctx);
     workspaceDir = workspace.dir;
-    const oracle = await git.checkOracle(workspaceDir);
+    const oracle = await git.checkOracle(workspaceDir, ctx);
     store.updateTask(taskId, {
       workspaceDir,
       oracleSha: oracle.oracleSha,
       capsRemaining: maxIterations,
     });
+    await refreshOutputs(store, git, taskId, workspaceDir, ctx);
     record('workspace', { detail: workspace.dir });
   } catch (err) {
     const message = errorMessage(err);
@@ -148,11 +156,20 @@ async function executeLoop(opts: {
       try {
         const planResult = await adapters[orchestratorProvider].run(
           workspaceDir,
-          planPrompt(title, prompt),
+          initial.projectId
+            ? planObjectPrompt(title, prompt)
+            : planPrompt(title, prompt),
           (text) => appendChunk(store, taskId, '[plan] ', text),
           signal,
         );
         planText = extractUsefulCliText(planResult.output);
+        const parsedPlan = parsePlanObject(planResult.output);
+        if (parsedPlan && initial.projectId) {
+          store.applyPlanObject(parsedPlan, taskId);
+          if (parsedPlan.reply) {
+            store.addMessage('orchestrator', parsedPlan.reply);
+          }
+        }
         pushTimeline(store, taskId, {
           role: 'plan',
           title: `${orchestratorProvider} planned the work`,
@@ -188,6 +205,20 @@ async function executeLoop(opts: {
     } else if (attempt > 1) {
       writerPrompt = retryPrompt(prompt, lastTestOutput);
     }
+    if (initial.projectId) {
+      const project = store.getProject();
+      if (project && project.id === initial.projectId) {
+        const thread = project.messages
+          .map((message) => `${message.role}: ${message.text}`)
+          .join('\n\n');
+        writerPrompt = projectWriterPrompt({
+          goal: project.goal,
+          itemPrompt: writerPrompt,
+          oraclePaths: project.oraclePaths,
+          thread,
+        });
+      }
+    }
 
     try {
       const writerResult = await adapters[provider].run(
@@ -197,7 +228,7 @@ async function executeLoop(opts: {
         signal,
       );
       setStep(store, taskId, 'writer', 'ok');
-      await refreshOutputs(store, git, taskId, workspaceDir);
+      await refreshOutputs(store, git, taskId, workspaceDir, ctx);
       pushTimeline(store, taskId, {
         role: 'writer',
         title:
@@ -228,7 +259,7 @@ async function executeLoop(opts: {
     store.updateTask(taskId, { currentStep: 'oracle' });
     let oracle;
     try {
-      oracle = await git.checkOracle(workspaceDir);
+      oracle = await git.checkOracle(workspaceDir, ctx);
     } catch (err) {
       const message = errorMessage(err);
       markFailed(store, taskId, message);
@@ -239,7 +270,7 @@ async function executeLoop(opts: {
       appendLine(
         store,
         taskId,
-        '[loop] ORACLE_TAMPERED parse.test.js changed; refusing commit',
+        `[loop] ORACLE_TAMPERED ${oracleLabel} changed; refusing commit`,
       );
       setStep(store, taskId, 'tests', 'fail');
       setStep(store, taskId, 'git', 'fail');
@@ -253,7 +284,7 @@ async function executeLoop(opts: {
 
     let tests;
     try {
-      tests = await git.runTests(workspaceDir);
+      tests = await git.runTests(workspaceDir, ctx);
     } catch (err) {
       const message = errorMessage(err);
       appendLine(store, taskId, `[tests] error: ${message}`);
@@ -276,7 +307,7 @@ async function executeLoop(opts: {
         title: 'Tests failed',
         body: extractUsefulCliText(tests.output, 800),
       });
-      await refreshOutputs(store, git, taskId, workspaceDir);
+      await refreshOutputs(store, git, taskId, workspaceDir, ctx);
       record('tests_fail', { attempt, step: 'tests' });
       continue;
     }
@@ -355,7 +386,11 @@ async function executeLoop(opts: {
     setStep(store, taskId, 'git', 'running');
     store.updateTask(taskId, { currentStep: 'git' });
     try {
-      const commit = await git.commitIfDirty(workspaceDir, `LoopSync: ${title}`);
+      const commit = await git.commitIfDirty(
+        workspaceDir,
+        `LoopSync: ${title}`,
+        ctx,
+      );
       if (!commit) {
         appendLine(store, taskId, '[git] working tree clean after passing tests');
         setStep(store, taskId, 'git', 'fail');
@@ -364,7 +399,7 @@ async function executeLoop(opts: {
       }
       appendLine(store, taskId, `[git] committed ${commit.sha.slice(0, 7)}`);
       setStep(store, taskId, 'git', 'ok');
-      await refreshOutputs(store, git, taskId, workspaceDir);
+      await refreshOutputs(store, git, taskId, workspaceDir, ctx);
       const files = store.getTask(taskId)?.outputFiles ?? [];
       pushTimeline(store, taskId, {
         role: 'git',
@@ -381,6 +416,7 @@ async function executeLoop(opts: {
         diff: commit.diff,
         capsRemaining: capsRemaining - 1,
       });
+      store.markPlanItemForTask(taskId, 'succeeded');
       record('succeeded', { attempt, step: 'git', detail: commit.sha });
       return;
     } catch (err) {
@@ -408,6 +444,7 @@ function markFailed(store: Store, taskId: string, lastError: string): void {
     return;
   }
   store.updateTask(taskId, { status: 'failed', lastError, currentStep: 'done' });
+  store.markPlanItemForTask(taskId, 'failed');
 }
 
 function setStep(
@@ -452,14 +489,32 @@ function appendChunk(
   appendLines(store, taskId, lines);
 }
 
+function jobContext(task: TaskState): WorkspaceContext | undefined {
+  if (
+    !task.sourceDir &&
+    !task.persistDir &&
+    !task.oraclePaths &&
+    !task.testCommand
+  ) {
+    return undefined;
+  }
+  return {
+    sourceDir: task.sourceDir,
+    oraclePaths: task.oraclePaths,
+    testCommand: task.testCommand,
+    persistDir: task.persistDir,
+  };
+}
+
 async function refreshOutputs(
   store: Store,
   git: GitRuntime,
   taskId: string,
   workspaceDir: string,
+  ctx?: WorkspaceContext,
 ): Promise<void> {
   try {
-    const outputFiles = await git.listOutputs(workspaceDir);
+    const outputFiles = await git.listOutputs(workspaceDir, ctx);
     store.updateTask(taskId, { outputFiles });
   } catch {
     // keep last known files

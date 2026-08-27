@@ -15,21 +15,37 @@
       <section class="composer" aria-labelledby="app-title">
         <header class="brand">
           <p class="eyebrow">LoopSync</p>
-          <h1 id="app-title">New run</h1>
+          <h1 id="app-title">New project</h1>
         </header>
 
+        <p id="oracleChip" class="oracle-chip" hidden></p>
+        <p id="sourceReadout" class="source-readout" hidden></p>
+
+        <ol id="thread" class="thread" hidden></ol>
+
         <form id="launch-form">
+          <label for="sourceDir">Folder</label>
+          <input
+            id="sourceDir"
+            name="sourceDir"
+            type="text"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="examples/sqrt"
+            value="examples/sqrt"
+          />
+
           <label for="title">Title</label>
           <input
             id="title"
             name="title"
             type="text"
             autocomplete="off"
-            value="Fix Off-By-One Index in Array Parser"
+            value="Integer square root"
           />
 
-          <label for="prompt">What should change</label>
-          <textarea id="prompt" name="prompt" rows="8">The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.</textarea>
+          <label for="prompt">Goal</label>
+          <textarea id="prompt" name="prompt" rows="8">Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js. Do not ask questions. Do not run git commit.</textarea>
 
           <div class="role-grid">
             <label>
@@ -65,6 +81,22 @@
             <button type="button" id="reset">Reset</button>
           </div>
         </form>
+
+        <form id="follow-form" hidden>
+          <label for="followup">Steer the orchestrator</label>
+          <textarea
+            id="followup"
+            name="followup"
+            rows="4"
+            placeholder="Switch the algorithm to binary search."
+          ></textarea>
+          <p id="followError" class="form-error" hidden></p>
+          <div class="actions">
+            <button type="submit" id="send">Send</button>
+            <button type="button" id="followCancel">Stop</button>
+            <button type="button" id="followReset">Reset</button>
+          </div>
+        </form>
       </section>
 
       <section class="activity" aria-labelledby="activity-heading">
@@ -73,11 +105,13 @@
           <span id="status" class="badge" hidden></span>
         </div>
         <p id="empty" class="empty">
-          Describe the change, pick who plans, writes, and reviews, then run.
-          Tests stay locked. The code shows up on the right.
+          Point LoopSync at a folder, describe the goal, and pick who plans,
+          writes, and reviews. Tests stay locked to that project — this is not
+          the parseIndex homework unless you open fixture/.
         </p>
         <div id="job" hidden>
           <p id="attempt" class="attempt"></p>
+          <ol id="plan" class="plan-list" hidden></ol>
           <ol id="steps" class="steps" aria-label="Pipeline"></ol>
           <ol id="timeline" class="timeline"></ol>
           <p id="shaLine" class="sha-line" hidden></p>
@@ -97,8 +131,8 @@
         <div id="fileTabs" class="file-tabs" hidden></div>
         <pre id="fileView" class="file-view" hidden></pre>
         <p id="filesEmpty" class="empty">
-          After the writer runs, changed files open here — including new files
-          like a Python module, not just the git diff.
+          After the writer runs, changed files open here. A sqrt project shows
+          sqrt.js — never parse.js.
         </p>
       </section>
     </main>

@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch server/src/index.ts",
-    "start": "tsx server/src/index.ts"
+    "start": "tsx server/src/index.ts",
+    "test": "tsx --test server/src/*.test.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "cors": "^2.8.6",

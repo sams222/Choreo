@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
-import * as path from 'node:path';
 import {
   CLI_TIMEOUT_MS,
   PROVIDER_COMMANDS,
@@ -121,8 +120,8 @@ function makeAdapter(provider: ProviderType): CLIAdapter {
   return {
     provider,
     run(workspaceDir, prompt, onLog, signal) {
-      if (!fs.existsSync(path.join(workspaceDir, 'parse.js'))) {
-        throw new Error(`parse.js missing in ${workspaceDir}`);
+      if (!fs.existsSync(workspaceDir) || !fs.statSync(workspaceDir).isDirectory()) {
+        throw new Error(`workspace missing: ${workspaceDir}`);
       }
       return spawnCli(
         command.bin,

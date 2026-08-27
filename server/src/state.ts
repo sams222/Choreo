@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type {
+  ChatMessage,
+  DashboardDefaults,
   LaunchTaskBody,
+  PlanItem,
+  PlanObject,
+  ProjectState,
   ProviderType,
   ServerSnapshot,
   TaskState,
@@ -21,11 +26,35 @@ function cloneTask(task: TaskState): TaskState {
     steps: task.steps?.map((step) => ({ ...step })),
     timeline: task.timeline?.map((item) => ({ ...item })),
     outputFiles: task.outputFiles?.map((file) => ({ ...file })),
+    oraclePaths: task.oraclePaths ? [...task.oraclePaths] : undefined,
+    testCommand: task.testCommand ? [...task.testCommand] : undefined,
+  };
+}
+
+function cloneProject(project: ProjectState): ProjectState {
+  return {
+    ...project,
+    testCommand: [...project.testCommand],
+    oraclePaths: [...project.oraclePaths],
+    messages: project.messages.map((message) => ({ ...message })),
+    plan: project.plan.map((item) => ({ ...item, files: [...item.files] })),
   };
 }
 
 function newTaskId(): string {
   return `task_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+function newProjectId(): string {
+  return `proj_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+function newItemId(): string {
+  return `item_${randomUUID().replaceAll('-', '').slice(0, 8)}`;
+}
+
+function newMessageId(): string {
+  return `msg_${randomUUID().replaceAll('-', '').slice(0, 8)}`;
 }
 
 function capLogs(logs: string[]): string[] {
@@ -35,15 +64,18 @@ function capLogs(logs: string[]): string[] {
   return logs.slice(-MAX_LOGS);
 }
 
-export function createStore() {
+export function createStore(defaults?: DashboardDefaults) {
   let tasks: TaskState[] = [];
   let slots: ServerSnapshot['slots'] = IDLE_SLOTS.map((slot) => ({ ...slot }));
+  let project: ProjectState | undefined;
 
   return {
     getSnapshot(): ServerSnapshot {
       return {
         tasks: tasks.map(cloneTask),
         slots: slots.map((slot) => ({ ...slot })),
+        project: project ? cloneProject(project) : undefined,
+        defaults,
       };
     },
 
@@ -71,6 +103,11 @@ export function createStore() {
         ],
         timeline: [],
         outputFiles: [],
+        projectId: body.projectId,
+        sourceDir: body.sourceDir,
+        oraclePaths: body.oraclePaths ? [...body.oraclePaths] : undefined,
+        testCommand: body.testCommand ? [...body.testCommand] : undefined,
+        persistDir: body.persistDir,
       };
       tasks = [...tasks, task];
       return cloneTask(task);
@@ -100,6 +137,16 @@ export function createStore() {
         outputFiles: patch.outputFiles
           ? patch.outputFiles.map((file) => ({ ...file }))
           : current.outputFiles?.map((file) => ({ ...file })),
+        oraclePaths: patch.oraclePaths
+          ? [...patch.oraclePaths]
+          : current.oraclePaths
+            ? [...current.oraclePaths]
+            : undefined,
+        testCommand: patch.testCommand
+          ? [...patch.testCommand]
+          : current.testCommand
+            ? [...current.testCommand]
+            : undefined,
       };
       tasks = tasks.map((item, i) => (i === index ? next : item));
       return cloneTask(next);
@@ -111,9 +158,115 @@ export function createStore() {
       );
     },
 
+    setProject(next: ProjectState): ProjectState {
+      project = cloneProject(next);
+      return cloneProject(project);
+    },
+
+    getProject(): ProjectState | undefined {
+      return project ? cloneProject(project) : undefined;
+    },
+
+    updateProject(patch: Partial<ProjectState>): ProjectState | undefined {
+      if (!project) {
+        return undefined;
+      }
+      project = cloneProject({
+        ...project,
+        ...patch,
+        testCommand: patch.testCommand
+          ? [...patch.testCommand]
+          : [...project.testCommand],
+        oraclePaths: patch.oraclePaths
+          ? [...patch.oraclePaths]
+          : [...project.oraclePaths],
+        messages: patch.messages
+          ? patch.messages.map((message) => ({ ...message }))
+          : project.messages.map((message) => ({ ...message })),
+        plan: patch.plan
+          ? patch.plan.map((item) => ({ ...item, files: [...item.files] }))
+          : project.plan.map((item) => ({ ...item, files: [...item.files] })),
+      });
+      return cloneProject(project);
+    },
+
+    addMessage(
+      role: ChatMessage['role'],
+      text: string,
+    ): ChatMessage | undefined {
+      if (!project) {
+        return undefined;
+      }
+      const message: ChatMessage = {
+        id: newMessageId(),
+        role,
+        text,
+        ts: Date.now(),
+      };
+      project = cloneProject({
+        ...project,
+        messages: [...project.messages, message],
+      });
+      return { ...message };
+    },
+
+    applyPlanObject(
+      parsed: PlanObject,
+      runningTaskId: string,
+    ): PlanItem[] | undefined {
+      if (!project) {
+        return undefined;
+      }
+      const items: PlanItem[] = parsed.items.map((item, index) => ({
+        id: newItemId(),
+        title: item.title,
+        prompt: item.prompt?.trim() || item.title,
+        files: [...(item.files ?? [])],
+        doneWhen: item.doneWhen,
+        status: index === 0 ? 'running' : 'pending',
+        taskId: index === 0 && runningTaskId ? runningTaskId : undefined,
+      }));
+      project = cloneProject({ ...project, plan: items });
+      return cloneProject(project).plan;
+    },
+
+    patchPlanItem(
+      itemId: string,
+      patch: Partial<PlanItem>,
+    ): PlanItem | undefined {
+      if (!project) {
+        return undefined;
+      }
+      const items = project.plan.map((item) =>
+        item.id === itemId
+          ? { ...item, ...patch, files: [...(patch.files ?? item.files)] }
+          : { ...item, files: [...item.files] },
+      );
+      project = cloneProject({ ...project, plan: items });
+      return items.find((item) => item.id === itemId);
+    },
+
+    markPlanItemForTask(
+      taskId: string,
+      status: PlanItem['status'],
+    ): void {
+      if (!project) {
+        return;
+      }
+      const items = project.plan.map((item) =>
+        item.taskId === taskId ? { ...item, status } : item,
+      );
+      project = cloneProject({ ...project, plan: items, activeTaskId: taskId });
+    },
+
+    newProjectId,
+    newItemId,
+    newTaskId,
+
     clear(): void {
       tasks = [];
       slots = IDLE_SLOTS.map((slot) => ({ ...slot }));
+      project = undefined;
     },
   };
 }

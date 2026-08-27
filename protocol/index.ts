@@ -47,6 +47,12 @@ export interface TaskState {
   lastReview?: ReviewVerdict;
   timeline?: TimelineEvent[];
   outputFiles?: OutputFile[];
+  /** Phase D: this task belongs to a project (not the homework fixture). */
+  projectId?: string;
+  sourceDir?: string;
+  oraclePaths?: string[];
+  testCommand?: string[];
+  persistDir?: string;
 }
 
 export interface TimelineEvent {
@@ -69,6 +75,9 @@ export interface ProviderSlot {
 export interface ServerSnapshot {
   tasks: TaskState[];
   slots: ProviderSlot[];
+  /** Phase D/E: at most one live project in RAM. */
+  project?: ProjectState;
+  defaults?: DashboardDefaults;
 }
 
 export interface RunResult {
@@ -103,17 +112,95 @@ export interface CLIAdapter {
   ): Promise<RunResult>;
 }
 
+/**
+ * Optional per-job isolation. Omit = Gate 2 homework fixture
+ * (`parse.js` / `parse.test.js` / `node --test`).
+ */
+export interface WorkspaceContext {
+  sourceDir?: string;
+  oraclePaths?: readonly string[];
+  testCommand?: readonly string[];
+  /** Reuse this directory on follow-up. Do not recopy from sourceDir. */
+  persistDir?: string;
+}
+
+export type ChatRole = 'user' | 'orchestrator';
+
+export interface ChatMessage {
+  id: string;
+  role: ChatRole;
+  text: string;
+  ts: number;
+}
+
+export type PlanItemStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+
+export interface PlanItem {
+  id: string;
+  title: string;
+  prompt: string;
+  files: string[];
+  doneWhen?: string;
+  status: PlanItemStatus;
+  taskId?: string;
+}
+
+export interface ProjectState {
+  id: string;
+  title: string;
+  goal: string;
+  sourceDir: string;
+  workspaceDir: string;
+  testCommand: string[];
+  oraclePaths: string[];
+  plannerProvider?: ProviderType;
+  writerProvider: ProviderType;
+  reviewerProvider?: ProviderType;
+  maxIterations: number;
+  messages: ChatMessage[];
+  plan: PlanItem[];
+  activeTaskId?: string;
+}
+
+export interface DashboardDefaults {
+  sourceDir: string;
+  title: string;
+  goal: string;
+  testCommand: string[];
+  oraclePaths: string[];
+}
+
+export interface PlanObject {
+  reply: string;
+  items: Array<{
+    title: string;
+    files?: string[];
+    doneWhen?: string;
+    prompt?: string;
+  }>;
+}
+
 /** Person 2 implements. Person 1 calls. */
 export interface GitRuntime {
-  createWorkspace(taskId: string): Promise<WorkspaceHandle>;
-  runTests(dir: string): Promise<TestResult>;
+  createWorkspace(
+    taskId: string,
+    ctx?: WorkspaceContext,
+  ): Promise<WorkspaceHandle>;
+  runTests(dir: string, ctx?: WorkspaceContext): Promise<TestResult>;
   getDiff(dir: string): Promise<string>;
-  commitIfDirty(dir: string, message: string): Promise<CommitResult | null>;
+  commitIfDirty(
+    dir: string,
+    message: string,
+    ctx?: WorkspaceContext,
+  ): Promise<CommitResult | null>;
   resetAll(): Promise<void>;
-  /** True if oracle paths (parse.test.js) differ from the fixture baseline. */
-  checkOracle(dir: string): Promise<{ dirty: boolean; oracleSha: string }>;
-  /** Changed/new production files vs the fixture (never oracle tests). */
-  listOutputs(dir: string): Promise<OutputFile[]>;
+  /** True if oracle paths differ from the source baseline. */
+  checkOracle(
+    dir: string,
+    ctx?: WorkspaceContext,
+  ): Promise<{ dirty: boolean; oracleSha: string }>;
+  /** Changed/new production files vs the source (never oracle tests). */
+  listOutputs(dir: string, ctx?: WorkspaceContext): Promise<OutputFile[]>;
 }
 
 export interface LaunchTaskBody {
@@ -123,6 +210,37 @@ export interface LaunchTaskBody {
   maxIterations?: number;
   orchestratorProvider?: ProviderType;
   reviewerProvider?: ProviderType;
+  projectId?: string;
+  sourceDir?: string;
+  oraclePaths?: string[];
+  testCommand?: string[];
+  persistDir?: string;
+}
+
+export interface CreateProjectBody {
+  title: string;
+  goal: string;
+  sourceDir: string;
+  testCommand?: string[];
+  oraclePaths?: string[];
+  writerProvider: ProviderType;
+  plannerProvider?: ProviderType;
+  reviewerProvider?: ProviderType;
+  maxIterations?: number;
+}
+
+export interface CreateProjectResponse {
+  projectId: string;
+  taskId: string;
+}
+
+export interface PostMessageBody {
+  text: string;
+}
+
+export interface PostMessageResponse {
+  ok: true;
+  taskId: string;
 }
 
 export interface LaunchTaskResponse {
@@ -140,7 +258,8 @@ export type ErrorCode =
   | 'TASK_NOT_FOUND'
   | 'RESET_FAILED'
   | 'ORACLE_TAMPERED'
-  | 'CAP_EXHAUSTED';
+  | 'CAP_EXHAUSTED'
+  | 'PROJECT_NOT_FOUND';
 
 export interface ErrorResponse {
   error: {
@@ -155,6 +274,8 @@ export const CLI_TIMEOUT_MS = 120_000;
 export const DEFAULT_MAX_ITERATIONS = 2;
 export const WORKSPACE_ROOT = '/tmp/loopsync-workspaces';
 export const ORACLE_PATHS = ['parse.test.js'] as const;
+export const SQRT_ORACLE_PATHS = ['sqrt.test.js'] as const;
+export const DEFAULT_TEST_COMMAND = ['node', '--test'] as const;
 export const REVIEW_OK = 'REVIEW_OK';
 export const REVIEW_REJECT = 'REVIEW_REJECT';
 
@@ -166,11 +287,23 @@ export const DEFAULT_LAUNCH: LaunchTaskBody = {
   maxIterations: 2,
 };
 
+export const DEFAULT_SQRT: Pick<
+  CreateProjectBody,
+  'title' | 'goal' | 'testCommand' | 'oraclePaths'
+> = {
+  title: 'Integer square root',
+  goal: 'Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js. Do not ask questions. Do not run git commit.',
+  testCommand: [...DEFAULT_TEST_COMMAND],
+  oraclePaths: [...SQRT_ORACLE_PATHS],
+};
+
 export const HTTP = {
   getState: 'GET /api/state',
   launch: 'POST /api/tasks',
   cancel: 'POST /api/tasks/:id/cancel',
   reset: 'POST /api/reset',
+  createProject: 'POST /api/projects',
+  projectMessage: 'POST /api/projects/:id/messages',
 } as const;
 
 /** Proven argv on the demo laptop. Person 3 must use these. */
@@ -270,4 +403,136 @@ export function parseReviewVerdict(output: string): ReviewVerdict {
     return 'reject';
   }
   return 'ok';
+}
+
+export function planObjectPrompt(title: string, userPrompt: string): string {
+  return `You are the orchestration agent for LoopSync. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
+
+Title: ${title}
+
+User task:
+${userPrompt}
+
+Reply with a JSON object (optionally in a fenced json code block) then a line that is exactly:
+PLAN_DONE
+
+The JSON shape:
+{"reply":"short message to the user","items":[{"title":"one work item","files":["path"],"doneWhen":"how we know it worked","prompt":"instructions for the writer"}]}`;
+}
+
+export function steerPrompt(
+  goal: string,
+  planJson: string,
+  thread: string,
+  userText: string,
+): string {
+  return `You are the orchestration agent for LoopSync. Do not edit files. Do not run git. Do not run tests. Do not ask questions.
+
+The user is steering an existing project. Patch the plan to follow their latest message. Keep locked tests locked.
+
+PROJECT GOAL:
+${goal}
+
+CURRENT PLAN JSON:
+${planJson}
+
+THREAD:
+${thread}
+
+LATEST USER MESSAGE:
+${userText}
+
+Reply with a JSON object (optionally in a fenced json code block) then a line that is exactly:
+PLAN_DONE
+
+The JSON shape:
+{"reply":"short message to the user","items":[{"title":"one work item","files":["path"],"doneWhen":"how we know it worked","prompt":"instructions for the writer including the latest steering"}]}`;
+}
+
+export function projectWriterPrompt(opts: {
+  goal: string;
+  itemPrompt: string;
+  oraclePaths: readonly string[];
+  thread: string;
+}): string {
+  const tests = opts.oraclePaths.join(', ') || '(none named)';
+  return `${opts.itemPrompt}
+
+PROJECT GOAL:
+${opts.goal}
+
+LOCKED TESTS: ${tests}
+Do not change those files. Do not ask questions. Do not run git commit.
+
+THREAD:
+${opts.thread || '(none yet)'}`;
+}
+
+export function formatPlanForWriter(plan: PlanObject): string {
+  return plan.items
+    .map((item, index) => {
+      const files = (item.files ?? []).join(', ') || '(unspecified)';
+      const done = item.doneWhen ? `; done when ${item.doneWhen}` : '';
+      return `${index + 1}. ${item.title} [${files}]${done}`;
+    })
+    .join('\n');
+}
+
+export function parsePlanObject(output: string): PlanObject | null {
+  const parsed = extractJsonObject(output);
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  const rawItems = Array.isArray(record.items) ? record.items : [];
+  const items: PlanObject['items'] = [];
+  for (const raw of rawItems) {
+    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+      continue;
+    }
+    const item = raw as Record<string, unknown>;
+    if (typeof item.title !== 'string' || item.title.trim() === '') {
+      continue;
+    }
+    const files = Array.isArray(item.files)
+      ? item.files.filter((file): file is string => typeof file === 'string')
+      : [];
+    items.push({
+      title: item.title.trim(),
+      files,
+      doneWhen:
+        typeof item.doneWhen === 'string' ? item.doneWhen : undefined,
+      prompt: typeof item.prompt === 'string' ? item.prompt : undefined,
+    });
+  }
+  if (items.length === 0) {
+    return null;
+  }
+  const reply =
+    typeof record.reply === 'string' && record.reply.trim() !== ''
+      ? record.reply.trim()
+      : items[0].title;
+  return { reply, items };
+}
+
+function extractJsonObject(text: string): unknown | null {
+  const candidates: string[] = [];
+  const fence = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let match: RegExpExecArray | null;
+  while ((match = fence.exec(text)) !== null) {
+    candidates.push(match[1]);
+  }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start !== -1 && end > start) {
+    candidates.push(text.slice(start, end + 1));
+  }
+  for (const raw of candidates) {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }

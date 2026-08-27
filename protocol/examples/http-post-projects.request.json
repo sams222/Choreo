@@ -1,0 +1,11 @@
+{
+  "title": "Integer square root",
+  "goal": "Implement integerSqrt in sqrt.js so integerSqrt(9) === 3. Do not change sqrt.test.js. Do not ask questions. Do not run git commit.",
+  "sourceDir": "examples/sqrt",
+  "testCommand": ["node", "--test"],
+  "oraclePaths": ["sqrt.test.js"],
+  "writerProvider": "codex",
+  "plannerProvider": "codex",
+  "reviewerProvider": "claude",
+  "maxIterations": 2
+}
