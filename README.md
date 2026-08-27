@@ -48,7 +48,7 @@ curl -s -D- -X POST http://127.0.0.1:4055/api/tasks \
 
 - **[protocol/index.ts](protocol/index.ts)** — frozen types, PORT `4055`, CLI argv (additive fields only)
 - **[server/src/](server/src/)** — Express orchestrator, git runtime, Claude/Codex adapters, `runLoop`
-- **[web/](web/)** — dashboard (polls every 300ms)
+- **[web/](web/)** — live session (polls every 300ms): awaiting states, Cursor-style chat, no code pane
 - **[examples/sqrt/](examples/sqrt/)** — optional sample tree you can paste as a folder, not the default job
 - **[fixture/](fixture/)** — Gate 2 homework (`4 !== 5`)
 - **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration
