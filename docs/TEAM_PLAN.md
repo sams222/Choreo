@@ -104,9 +104,11 @@ There is **no** special CLI “resume.” Attempt 2 is a **new process** whose p
 4. No Gemini. No fake adapter on stage.
 5. If a CLI hangs: Person 3’s `AbortSignal` + timeout (120s). Person 4 has Cancel.
 
-Per-person briefs:
+Per-person briefs (contracts):
 
 - [Person 1 — Orchestrator](person-1-orchestrator.md)
 - [Person 2 — Git & tests](person-2-git-runtime.md)
 - [Person 3 — CLI runners](person-3-cli-adapters.md)
 - [Person 4 — Dashboard & fixture](person-4-dashboard.md)
+
+**Agent playbooks (step-by-step):** [impl/README.md](impl/README.md)

@@ -1,5 +1,5 @@
 /**
- * LOOPGRID FROZEN PROTOCOL
+ * LOOPSYNC FROZEN PROTOCOL
  * Do not change field names without a team shout in the group chat.
  * JSON examples live in protocol/examples/. Person 1–4 all code against this file.
  */

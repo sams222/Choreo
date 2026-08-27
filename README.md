@@ -11,6 +11,7 @@ Gemini CLI is not in scope (Google shut off individual Code Assist for that clie
 - **[docs/person-2-git-runtime.md](docs/person-2-git-runtime.md)** — copy, tests, commit, reset
 - **[docs/person-3-cli-adapters.md](docs/person-3-cli-adapters.md)** — spawn Claude / Codex
 - **[docs/person-4-dashboard.md](docs/person-4-dashboard.md)** — UI + fixture homework
+- **[docs/impl/](docs/impl/)** — numbered agent playbooks (files, verify commands, stop rules)
 
 **Frozen types:** [protocol/index.ts](protocol/index.ts)  
 **JSON payloads:** [protocol/examples/](protocol/examples/)  
