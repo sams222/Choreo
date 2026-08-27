@@ -10,6 +10,7 @@ Gemini CLI is not in scope (Google shut off individual Code Assist for that clie
 
 - **[docs/TEAM_PLAN.md](docs/TEAM_PLAN.md)** — overview, demo script
 - **[docs/BUILD_PLAN.md](docs/BUILD_PLAN.md)** — phases, gates, parallel-agent graph
+- **[docs/WORKFLOW.md](docs/WORKFLOW.md)** — user → HTTP → loop
 - **[docs/person-1-orchestrator.md](docs/person-1-orchestrator.md)** — Track A (HTTP + loop)
 - **[docs/person-2-git-runtime.md](docs/person-2-git-runtime.md)** — Track B (git + tests)
 - **[docs/person-3-cli-adapters.md](docs/person-3-cli-adapters.md)** — Track C (Claude / Codex)
