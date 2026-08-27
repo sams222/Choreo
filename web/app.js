@@ -55,6 +55,7 @@ for (const id of [
   'maxIterations',
   'formError',
   'send',
+  'apply',
   'cancel',
   'reset',
   'reset-confirm',
@@ -738,6 +739,18 @@ function updateActions() {
     els.cancel.hidden = !lastProject;
   }
   if (els.reset) els.reset.disabled = !reachable;
+  if (els.apply) {
+    const ready = Boolean(lastProject?.readyAt);
+    const applied = Boolean(lastProject?.appliedAt);
+    els.apply.hidden = !ready;
+    els.apply.disabled = !reachable || applied || Boolean(replay);
+    els.apply.textContent = applied
+      ? `Applied · ${lastProject?.appliedFiles?.length ?? 0} files`
+      : 'Apply changes';
+    els.apply.title = lastProject?.applyTarget
+      ? `Write completed files to ${lastProject.applyTarget}`
+      : '';
+  }
   if (els.send) {
     els.send.textContent = lastProject ? (running ? 'Steer' : 'Send') : 'Run';
   }
@@ -954,6 +967,28 @@ async function resetAll() {
   }
 }
 
+async function applyProject() {
+  if (!lastProject?.id || !els.apply) return;
+  setFormError('');
+  els.apply.disabled = true;
+  els.apply.textContent = 'Applying…';
+  try {
+    const res = await fetch(`${API}/api/projects/${lastProject.id}/apply`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      setFormError(await readErrorMessage(res));
+      updateActions();
+      return;
+    }
+    await poll();
+  } catch {
+    setUnreachable(true);
+    setFormError('Could not apply changes to the project folder');
+    updateActions();
+  }
+}
+
 async function createProject(goal) {
   const attempts = Number.parseInt(els.maxIterations?.value ?? '5', 10);
   const res = await fetch(`${API}/api/projects`, {
@@ -1023,6 +1058,7 @@ els.prompt.addEventListener('keydown', (event) => {
 });
 
 els.cancel.addEventListener('click', cancelCurrent);
+els.apply?.addEventListener('click', applyProject);
 els.reset?.addEventListener('click', () => {
   if (els.resetConfirm) els.resetConfirm.hidden = false;
 });

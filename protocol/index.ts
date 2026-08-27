@@ -377,6 +377,13 @@ export interface ProjectState {
   planDelta?: PlanDelta;
   /** Plan history — one card per (re)plan, newest last. */
   planCards?: PlanCard[];
+  /** Set only after all work and any parallel merge have completed successfully. */
+  readyAt?: number;
+  /** Directory that receives files when the user explicitly clicks Apply. */
+  applyTarget?: string;
+  /** Audit trail for the last successful apply operation. */
+  appliedAt?: number;
+  appliedFiles?: string[];
 }
 
 export type PlannerPhase = 'idle' | 'planning' | 'steering' | 'done' | 'failed';
@@ -505,7 +512,9 @@ export type ErrorCode =
   | 'RESET_FAILED'
   | 'ORACLE_TAMPERED'
   | 'CAP_EXHAUSTED'
-  | 'PROJECT_NOT_FOUND';
+  | 'PROJECT_NOT_FOUND'
+  | 'APPLY_NOT_READY'
+  | 'APPLY_FAILED';
 
 export interface ErrorResponse {
   error: {
@@ -569,6 +578,7 @@ export const HTTP = {
   createProject: 'POST /api/projects',
   projectMessage: 'POST /api/projects/:id/messages',
   cancelSteering: 'POST /api/projects/:id/steering/:messageId/cancel',
+  applyProject: 'POST /api/projects/:id/apply',
 } as const;
 
 /** Proven argv on the demo laptop. Person 3 must use these. */

@@ -62,6 +62,7 @@ function cloneProject(project: ProjectState): ProjectState {
       items: card.items.map((item) => ({ ...item, files: [...item.files] })),
       delta: card.delta ? { ...card.delta } : undefined,
     })),
+    appliedFiles: project.appliedFiles ? [...project.appliedFiles] : undefined,
   };
 }
 
@@ -249,6 +250,11 @@ export function createStore(defaults?: DashboardDefaults) {
         plan: patch.plan
           ? patch.plan.map((item) => ({ ...item, files: [...item.files] }))
           : project.plan.map((item) => ({ ...item, files: [...item.files] })),
+        appliedFiles: patch.appliedFiles
+          ? [...patch.appliedFiles]
+          : project.appliedFiles
+            ? [...project.appliedFiles]
+            : undefined,
         shards:
           'shards' in patch
             ? patch.shards

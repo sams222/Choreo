@@ -269,6 +269,84 @@ function resolveSourceDir(
   return resolved;
 }
 
+const APPLY_SKIP_NAMES = new Set([
+  '.git',
+  '.choreo',
+  'node_modules',
+  'dist',
+  'coverage',
+]);
+
+/**
+ * Copy a completed isolated workspace into the user's chosen project folder.
+ * This is intentionally additive: generated/changed files are written, while
+ * files deleted by an agent are not deleted from the user's working tree.
+ */
+export function applyWorkspace(workspaceDir: string, targetDir: string): string[] {
+  const source = path.resolve(workspaceDir);
+  const target = path.resolve(targetDir);
+  if (!fs.existsSync(source) || !fs.statSync(source).isDirectory()) {
+    throw new Error(`workspace is not a directory: ${source}`);
+  }
+  if (source === target || target.startsWith(`${source}${path.sep}`)) {
+    throw new Error('apply target must be outside the isolated workspace');
+  }
+  fs.mkdirSync(target, { recursive: true });
+  const applied: string[] = [];
+
+  const copyDir = (current: string, relDir: string): void => {
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (APPLY_SKIP_NAMES.has(entry.name)) continue;
+      const rel = relDir ? path.join(relDir, entry.name) : entry.name;
+      const from = path.join(current, entry.name);
+      const to = path.join(target, rel);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) {
+        copyDir(from, rel);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (
+        fs.existsSync(to) &&
+        fs.statSync(to).isFile() &&
+        fs.readFileSync(from).equals(fs.readFileSync(to))
+      ) {
+        continue;
+      }
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(from, to);
+      fs.chmodSync(to, fs.statSync(from).mode);
+      applied.push(rel.split(path.sep).join('/'));
+    }
+  };
+
+  copyDir(source, '');
+  return applied.sort();
+}
+
+export function isProjectReady(
+  project: ProjectState,
+  tasks: ServerSnapshot['tasks'],
+): boolean {
+  const plannerActive =
+    project.planner?.phase === 'planning' ||
+    project.planner?.phase === 'steering';
+  const taskActive = tasks.some(
+    (task) =>
+      task.projectId === project.id &&
+      (task.status === 'queued' ||
+        task.status === 'running' ||
+        task.status === 'retrying'),
+  );
+  return Boolean(
+    project.plan.length > 0 &&
+      project.plan.every((item) => item.status === 'succeeded') &&
+      !project.shards &&
+      !plannerActive &&
+      !taskActive,
+  );
+}
+
 export function dashboardDefaults(
   overrides?: Partial<{
     sourceDir: string;
@@ -360,6 +438,14 @@ export function createHttpApp(deps: {
   function occupy(involved: Set<ProviderType>): void {
     for (const provider of involved) {
       store.setBusy(provider, true);
+    }
+  }
+
+  function markReadyIfComplete(): void {
+    const project = store.getProject();
+    if (!project || project.readyAt) return;
+    if (isProjectReady(project, store.getSnapshot().tasks)) {
+      store.updateProject({ readyAt: monotonicNow() });
     }
   }
 
@@ -470,7 +556,6 @@ export function createHttpApp(deps: {
       const testFiles = await git.listTestFiles(project.workspaceDir);
       store.updateProject({
         oraclePaths: testFiles,
-        shards: undefined,
         frozenAt: monotonicNow(),
       });
       const ctx = {
@@ -487,6 +572,7 @@ export function createHttpApp(deps: {
         if (codeItem) {
           store.patchPlanItem(codeItem.id, { status: 'pending' });
         }
+        store.updateProject({ shards: undefined });
         return;
       }
       await git.createWorkspace(`merge_${project.id}`, ctx);
@@ -507,6 +593,10 @@ export function createHttpApp(deps: {
           });
         }
       }
+      store.updateProject({
+        shards: undefined,
+        readyAt: monotonicNow(),
+      });
     } finally {
       store.setBusy(project.writerProvider, false);
     }
@@ -665,6 +755,7 @@ export function createHttpApp(deps: {
       if (testsDone && codeDone) {
         void mergeParallelShards(store.getProject() ?? project).then(() => {
           startEligibleItems();
+          markReadyIfComplete();
         });
         return;
       }
@@ -674,6 +765,7 @@ export function createHttpApp(deps: {
     }
     startEligibleItems();
     drainSteeringIntoRun();
+    markReadyIfComplete();
   }
 
   app.use(express.json());
@@ -806,6 +898,7 @@ export function createHttpApp(deps: {
       goal: parsed.goal,
       sourceDir,
       workspaceDir,
+      applyTarget: sourceDir ?? projectDir,
       testCommand,
       oraclePaths,
       plannerProvider: parsed.plannerProvider,
@@ -876,6 +969,11 @@ export function createHttpApp(deps: {
       return;
     }
     const userText = text.trim();
+    store.updateProject({
+      readyAt: undefined,
+      appliedAt: undefined,
+      appliedFiles: [],
+    });
     const includePlanner = Boolean(project.plannerProvider);
     const involved = involvedFromProject(project, includePlanner);
     const running = store
@@ -977,6 +1075,54 @@ export function createHttpApp(deps: {
       return;
     }
     res.status(201).json({ ok: true, taskId: started });
+  });
+
+  app.post('/api/projects/:id/apply', (req, res) => {
+    const project = store.getProject();
+    if (!project || project.id !== req.params.id) {
+      sendError(res, 404, 'PROJECT_NOT_FOUND', 'project not found');
+      return;
+    }
+    if (!project.readyAt || !isProjectReady(project, store.getSnapshot().tasks)) {
+      sendError(
+        res,
+        409,
+        'APPLY_NOT_READY',
+        'the project is not ready to apply yet',
+      );
+      return;
+    }
+    const target = path.resolve(project.applyTarget ?? project.sourceDir ?? projectDir);
+    const workspace = path.resolve(project.workspaceDir);
+    const root = path.resolve(workspaceRoot());
+    if (workspace !== root && !workspace.startsWith(`${root}${path.sep}`)) {
+      sendError(res, 500, 'APPLY_FAILED', 'workspace is outside Choreo isolation');
+      return;
+    }
+    if (project.appliedAt) {
+      res.status(200).json({
+        ok: true,
+        target,
+        files: project.appliedFiles ?? [],
+        alreadyApplied: true,
+      });
+      return;
+    }
+    try {
+      const files = applyWorkspace(workspace, target);
+      store.updateProject({
+        appliedAt: monotonicNow(),
+        appliedFiles: files,
+      });
+      res.status(200).json({ ok: true, target, files });
+    } catch (err) {
+      sendError(
+        res,
+        500,
+        'APPLY_FAILED',
+        err instanceof Error ? err.message : String(err),
+      );
+    }
   });
 
   /** §3 — cancel a steering message that has not been folded in yet. */

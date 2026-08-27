@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Choreo</title>
-    <link rel="stylesheet" href="styles.css?v=refined5" />
+    <link rel="stylesheet" href="styles.css?v=choreo2" />
   </head>
   <body>
     <div id="unreachable" class="banner" hidden>
@@ -18,8 +18,8 @@
       <header class="top">
         <div class="brand">
           <div class="brand-mark" aria-hidden="true"><i></i><i></i></div>
-          <p class="eyebrow">Choreo</p>
-          <h1 id="app-title">New project</h1>
+          <p class="brand-name">Choreo</p>
+          <h1 id="app-title" class="sr">New project</h1>
         </div>
 
         <div class="head-mid">
@@ -149,9 +149,14 @@
           </p>
         </form>
 
-        <button type="button" id="reset" class="text-reset" hidden>
-          Reset project
-        </button>
+        <div class="project-actions">
+          <button type="button" id="apply" class="apply-button" hidden>
+            Apply changes
+          </button>
+          <button type="button" id="reset" class="text-reset" hidden>
+            Reset project
+          </button>
+        </div>
       </footer>
     </div>
 
@@ -167,6 +172,6 @@
       </div>
     </div>
 
-    <script src="app.js?v=choreo1"></script>
+    <script src="app.js?v=choreo2"></script>
   </body>
 </html>

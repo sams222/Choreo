@@ -36,6 +36,11 @@ choreo
 
 That starts the dashboard and points orchestration at the folder you launched from. Claude and Codex run against a copy of that tree. Leave Settings → Folder blank (or pass `--empty`) to start from an empty workspace instead.
 
+After every plan item succeeds and any parallel worktrees have merged, click
+**Apply changes** to write the completed files back to the launch directory.
+Apply is additive: it writes new and changed files without deleting existing
+files, and excludes `.git`, `.choreo`, dependencies, coverage, and build output.
+
 ```bash
 choreo                  # this directory
 choreo ../other-app     # another folder
