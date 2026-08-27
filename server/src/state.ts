@@ -1,0 +1,93 @@
+import { randomUUID } from 'node:crypto';
+import type {
+  LaunchTaskBody,
+  ProviderType,
+  ServerSnapshot,
+  TaskState,
+} from '../../protocol/index.ts';
+import { DEFAULT_MAX_ITERATIONS } from '../../protocol/index.ts';
+
+const MAX_LOGS = 500;
+
+const IDLE_SLOTS: ServerSnapshot['slots'] = [
+  { provider: 'claude', isBusy: false },
+  { provider: 'codex', isBusy: false },
+];
+
+function cloneTask(task: TaskState): TaskState {
+  return { ...task, logs: [...task.logs] };
+}
+
+function newTaskId(): string {
+  return `task_${randomUUID().replaceAll('-', '').slice(0, 12)}`;
+}
+
+function capLogs(logs: string[]): string[] {
+  if (logs.length <= MAX_LOGS) {
+    return [...logs];
+  }
+  return logs.slice(-MAX_LOGS);
+}
+
+export function createStore() {
+  let tasks: TaskState[] = [];
+  let slots: ServerSnapshot['slots'] = IDLE_SLOTS.map((slot) => ({ ...slot }));
+
+  return {
+    getSnapshot(): ServerSnapshot {
+      return {
+        tasks: tasks.map(cloneTask),
+        slots: slots.map((slot) => ({ ...slot })),
+      };
+    },
+
+    addTask(body: LaunchTaskBody): TaskState {
+      const task: TaskState = {
+        id: newTaskId(),
+        title: body.title,
+        prompt: body.prompt,
+        provider: body.provider,
+        status: 'queued',
+        currentIteration: 0,
+        maxIterations: body.maxIterations ?? DEFAULT_MAX_ITERATIONS,
+        workspaceDir: '',
+        logs: [],
+      };
+      tasks = [...tasks, task];
+      return cloneTask(task);
+    },
+
+    getTask(id: string): TaskState | undefined {
+      const task = tasks.find((item) => item.id === id);
+      return task ? cloneTask(task) : undefined;
+    },
+
+    updateTask(id: string, patch: Partial<TaskState>): TaskState | undefined {
+      const index = tasks.findIndex((item) => item.id === id);
+      if (index === -1) {
+        return undefined;
+      }
+      const current = tasks[index];
+      const next: TaskState = {
+        ...current,
+        ...patch,
+        logs: capLogs(patch.logs ?? current.logs),
+      };
+      tasks = tasks.map((item, i) => (i === index ? next : item));
+      return cloneTask(next);
+    },
+
+    setBusy(provider: ProviderType, isBusy: boolean): void {
+      slots = slots.map((slot) =>
+        slot.provider === provider ? { ...slot, isBusy } : slot,
+      );
+    },
+
+    clear(): void {
+      tasks = [];
+      slots = IDLE_SLOTS.map((slot) => ({ ...slot }));
+    },
+  };
+}
+
+export type Store = ReturnType<typeof createStore>;
