@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>LoopSync</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=orch3" />
   </head>
   <body>
     <div id="unreachable" class="banner" hidden>
@@ -16,7 +16,6 @@
         <header class="brand">
           <p class="eyebrow">LoopSync</p>
           <h1 id="app-title">New project</h1>
-          <button type="button" id="reset" class="text-reset">Reset</button>
         </header>
 
         <p id="oracleChip" class="oracle-chip" hidden></p>
@@ -24,11 +23,11 @@
 
         <ol id="thread" class="thread" hidden></ol>
 
-        <form id="launch-form">
+        <form id="launch-form" autocomplete="off">
           <label for="sourceDir">Folder (optional)</label>
           <input
             id="sourceDir"
-            name="sourceDir"
+            name="ls-folder"
             type="text"
             autocomplete="off"
             spellcheck="false"
@@ -38,7 +37,7 @@
           <label for="title">Title</label>
           <input
             id="title"
-            name="title"
+            name="ls-title"
             type="text"
             autocomplete="off"
             placeholder="Untitled"
@@ -47,8 +46,9 @@
           <label for="prompt">Goal</label>
           <textarea
             id="prompt"
-            name="prompt"
+            name="ls-goal"
             rows="8"
+            autocomplete="off"
             placeholder="What should we build? LoopSync writes tests and implementation as separate steps, in parallel when two agents are free."
           ></textarea>
 
@@ -82,7 +82,7 @@
 
           <div class="actions">
             <button type="submit" id="launch">Run</button>
-            <button type="button" id="cancel">Stop</button>
+            <button type="button" id="cancel">Stop this run</button>
           </div>
         </form>
 
@@ -97,9 +97,25 @@
           <p id="followError" class="form-error" hidden></p>
           <div class="actions">
             <button type="submit" id="send">Send</button>
-            <button type="button" id="followCancel">Stop</button>
+            <button type="button" id="followCancel">Stop this run</button>
           </div>
         </form>
+
+        <button type="button" id="reset" class="text-reset" hidden>
+          Clear this project
+        </button>
+        <div id="reset-confirm" class="confirm-mask" hidden>
+          <div class="confirm-card" role="dialog" aria-labelledby="reset-copy">
+            <p id="reset-copy">
+              Clear the live project from this session? The ledger on disk is
+              kept.
+            </p>
+            <div class="actions">
+              <button type="button" id="reset-yes">Clear project</button>
+              <button type="button" id="reset-no">Keep going</button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section class="activity" aria-labelledby="activity-heading">
@@ -141,6 +157,6 @@
       </section>
     </main>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=orch3"></script>
   </body>
 </html>

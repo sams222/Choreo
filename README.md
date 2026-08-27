@@ -48,18 +48,11 @@ curl -s -D- -X POST http://127.0.0.1:4055/api/tasks \
 
 - **[protocol/index.ts](protocol/index.ts)** — frozen types, PORT `4055`, CLI argv (additive fields only)
 - **[server/src/](server/src/)** — Express orchestrator, git runtime, Claude/Codex adapters, `runLoop`
-<<<<<<< HEAD
-- **[web/](web/)** — vanilla dashboard (polls every 300ms)
-- **[examples/sqrt/](examples/sqrt/)** — Phase D demo: `integerSqrt` / locked `sqrt.test.js`
-- **[fixture/](fixture/)** — homework that `node --test` fails with `4 !== 5`
-- **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration (goal → plan → judged steps)
-- **[docs/KERNEL_RISKS.md](docs/KERNEL_RISKS.md)** — spawn, review, oracle, cancel, slots, retry gaps
-=======
 - **[web/](web/)** — dashboard (polls every 300ms)
 - **[examples/sqrt/](examples/sqrt/)** — optional sample tree you can paste as a folder, not the default job
 - **[fixture/](fixture/)** — Gate 2 homework (`4 !== 5`)
 - **[docs/PLATFORM.md](docs/PLATFORM.md)** — project-scale orchestration
->>>>>>> 74c1199 (Treat tests and implementation as separate orchestration steps.)
+- **[docs/KERNEL_RISKS.md](docs/KERNEL_RISKS.md)** — spawn, review, oracle, cancel, slots, retry gaps
 
 ## Proven CLI flags (do not change)
 

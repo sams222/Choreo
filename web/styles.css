@@ -92,16 +92,55 @@ body {
 }
 
 .text-reset {
-  margin-left: auto;
+  margin-top: 28px;
   min-height: 32px;
-  padding: 4px 10px;
+  padding: 0;
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border: 0;
   color: var(--muted);
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
   cursor: pointer;
+}
+
+.confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 14, 0.72);
+}
+
+.confirm-card {
+  width: min(420px, calc(100vw - 32px));
+  padding: 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.confirm-card p {
+  margin: 0 0 16px;
+  line-height: 1.45;
+}
+
+.confirm-card .actions {
+  margin-top: 0;
+}
+
+#reset-yes {
+  background: var(--danger);
+  color: #1a0a0a;
+  border: 0;
+}
+
+#reset-no {
+  background: var(--raised);
+  border: 1px solid var(--border);
 }
 
 .oracle-chip.open {
@@ -320,20 +359,23 @@ textarea {
   cursor: pointer;
 }
 
-#launch {
+#launch,
+#send {
   background: var(--accent);
   color: var(--accent-ink);
 }
 
-#cancel {
+#cancel,
+#followCancel {
   background: transparent;
   border-color: var(--danger);
   color: #f3b4b4;
 }
 
-#reset {
-  background: var(--raised);
-  border-color: var(--border);
+#reset.text-reset {
+  background: transparent;
+  border: 0;
+  color: var(--muted);
 }
 
 button:disabled {

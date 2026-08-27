@@ -42,6 +42,9 @@ const els = {
   send: document.getElementById('send'),
   cancel: document.getElementById('cancel'),
   reset: document.getElementById('reset'),
+  resetConfirm: document.getElementById('reset-confirm'),
+  resetYes: document.getElementById('reset-yes'),
+  resetNo: document.getElementById('reset-no'),
   followCancel: document.getElementById('followCancel'),
   empty: document.getElementById('empty'),
   job: document.getElementById('job'),
@@ -84,12 +87,28 @@ function setFormError(message) {
   }
 }
 
-function applyDefaults(defaults) {
-  if (defaultsApplied || !defaults || lastProject) return;
-  defaultsApplied = true;
-  if (els.sourceDir && !els.sourceDir.value && defaults.sourceDir) {
-    els.sourceDir.value = defaults.sourceDir;
+let userTouchedForm = false;
+
+function markFormTouched() {
+  userTouchedForm = true;
+}
+
+function scrubHomeworkAutofill() {
+  if (userTouchedForm) return;
+  const blob = `${els.sourceDir?.value ?? ''} ${els.title?.value ?? ''} ${els.prompt?.value ?? ''}`;
+  if (
+    /examples\/sqrt|parseIndex|parse\.test\.js|Do not change sqrt\.test\.js/i.test(
+      blob,
+    )
+  ) {
+    if (els.sourceDir) els.sourceDir.value = '';
+    if (els.title) els.title.value = '';
+    if (els.prompt) els.prompt.value = '';
   }
+}
+
+function applyDefaults() {
+  /* no canned project — keep the form empty */
 }
 
 function applySlotBusy(slots) {
@@ -270,6 +289,7 @@ function renderComposer(project) {
   const open = Boolean(project);
   els.form.hidden = open;
   els.followForm.hidden = !open;
+  if (els.reset) els.reset.hidden = !open;
   els.appTitle.textContent = open ? project.title : 'New project';
   if (els.oracleChip) {
     els.oracleChip.hidden = !open;
@@ -290,7 +310,7 @@ function renderComposer(project) {
 }
 
 function render(snapshot) {
-  applyDefaults(snapshot?.defaults);
+  applyDefaults();
   applySlotBusy(snapshot?.slots ?? []);
   const project = snapshot?.project ?? null;
   const task =
@@ -315,6 +335,7 @@ function render(snapshot) {
     return;
   }
 
+  if (els.reset) els.reset.hidden = !project;
   els.empty.hidden = true;
   els.job.hidden = false;
   if (task) {
@@ -393,13 +414,23 @@ async function cancelCurrent() {
   }
 }
 
+function hideResetConfirm() {
+  if (els.resetConfirm) els.resetConfirm.hidden = true;
+}
+
+function showResetConfirm() {
+  if (els.resetConfirm) els.resetConfirm.hidden = false;
+}
+
 async function resetAll() {
-  if (!window.confirm('Reset the live project? The ledger on disk is kept.')) {
-    return;
-  }
+  hideResetConfirm();
   setFormError('');
   selectedFile = null;
   defaultsApplied = false;
+  userTouchedForm = false;
+  if (els.sourceDir) els.sourceDir.value = '';
+  if (els.title) els.title.value = '';
+  if (els.prompt) els.prompt.value = '';
   try {
     const res = await fetch(`${API}/api/reset`, { method: 'POST' });
     if (!res.ok) setFormError(await readErrorMessage(res));
@@ -479,11 +510,26 @@ els.followForm.addEventListener('submit', async (event) => {
 
 els.cancel.addEventListener('click', cancelCurrent);
 els.followCancel.addEventListener('click', cancelCurrent);
-els.reset.addEventListener('click', resetAll);
+els.reset?.addEventListener('click', showResetConfirm);
+els.resetYes?.addEventListener('click', resetAll);
+els.resetNo?.addEventListener('click', hideResetConfirm);
+els.resetConfirm?.addEventListener('click', (event) => {
+  if (event.target === els.resetConfirm) hideResetConfirm();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') hideResetConfirm();
+});
+for (const field of [els.sourceDir, els.title, els.prompt]) {
+  field?.addEventListener('input', markFormTouched);
+}
 
 els.provider.addEventListener('change', () => updateActions(lastTask));
 els.reviewerProvider?.addEventListener('change', () => updateActions(lastTask));
 els.orchestratorProvider?.addEventListener('change', () => updateActions(lastTask));
 
+scrubHomeworkAutofill();
+window.addEventListener('load', scrubHomeworkAutofill);
+setTimeout(scrubHomeworkAutofill, 0);
+setTimeout(scrubHomeworkAutofill, 400);
 poll();
 setInterval(poll, POLL_MS);

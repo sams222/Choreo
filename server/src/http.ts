@@ -841,6 +841,17 @@ export function createHttpApp(deps: {
   });
 
   fs.mkdirSync(WEB_DIR, { recursive: true });
+  app.use((req, res, next) => {
+    if (
+      req.path === '/' ||
+      req.path.endsWith('.html') ||
+      req.path.endsWith('.js') ||
+      req.path.endsWith('.css')
+    ) {
+      res.setHeader('Cache-Control', 'no-store');
+    }
+    next();
+  });
   app.use(express.static(WEB_DIR));
 
   return app;
