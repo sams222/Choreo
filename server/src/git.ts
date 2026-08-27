@@ -6,6 +6,7 @@ import {
   ORACLE_PATHS,
   WORKSPACE_ROOT,
   type GitRuntime,
+  type OutputFile,
 } from '../../protocol/index.ts';
 
 export function createGitRuntime(fixtureDir: string): GitRuntime {
@@ -64,16 +65,19 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
       throw new Error('Never commit in original fixture/');
     }
 
-    // Only the homework file. `git add -A` also stages untracked fixture
-    // extras (README.md) and pollutes the demo SHA.
-    await runGit(dir, ['add', '--', 'parse.js']);
     if (await isOracleDirty(dir)) {
       throw new Error('ORACLE_TAMPERED: parse.test.js changed; refusing commit');
     }
+    const skip = new Set<string>([...ORACLE_PATHS, 'README.md']);
     const status = await runGit(dir, ['status', '--porcelain']);
-    if (status.stdout.trim() === '') {
+    const rels = status.stdout
+      .split('\n')
+      .map((line) => line.slice(3).trim())
+      .filter((rel) => rel && !skip.has(rel) && !rel.startsWith('.git'));
+    if (rels.length === 0) {
       return null;
     }
+    await runGit(dir, ['add', '--', ...rels]);
 
     await runGit(dir, ['commit', '-m', message, '--no-verify'], {
       env: { GIT_EDITOR: 'true' },
@@ -82,6 +86,29 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     const sha = shaResult.stdout.trim();
     const diffResult = await runGit(dir, ['diff', 'HEAD~1', 'HEAD']);
     return { sha, diff: diffResult.stdout };
+  }
+
+  async function listOutputs(dir: string): Promise<OutputFile[]> {
+    const skip = new Set<string>([...ORACLE_PATHS, 'README.md', 'package.json']);
+    const files: OutputFile[] = [];
+    walk(dir, '', (rel, abs) => {
+      if (skip.has(rel) || rel.startsWith('.git')) {
+        return;
+      }
+      const baseline = path.join(fixtureDir, rel);
+      const content = fs.readFileSync(abs, 'utf8');
+      if (content.length > 80_000) {
+        return;
+      }
+      const same =
+        fs.existsSync(baseline) &&
+        fs.readFileSync(baseline, 'utf8') === content;
+      if (same) {
+        return;
+      }
+      files.push({ path: rel, content });
+    });
+    return files.sort((a, b) => a.path.localeCompare(b.path));
   }
 
   async function checkOracle(dir: string) {
@@ -119,7 +146,33 @@ export function createGitRuntime(fixtureDir: string): GitRuntime {
     return hash.digest('hex');
   }
 
-  return { createWorkspace, runTests, getDiff, commitIfDirty, resetAll, checkOracle };
+  return { createWorkspace, runTests, getDiff, commitIfDirty, resetAll, checkOracle, listOutputs };
+}
+
+function walk(
+  root: string,
+  rel: string,
+  visit: (rel: string, abs: string) => void,
+): void {
+  const abs = rel ? path.join(root, rel) : root;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(abs, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.name === '.git' || entry.name === 'node_modules') {
+      continue;
+    }
+    const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+    const childAbs = path.join(abs, entry.name);
+    if (entry.isDirectory()) {
+      walk(root, childRel, visit);
+    } else if (entry.isFile()) {
+      visit(childRel, childAbs);
+    }
+  }
 }
 
 type SpawnResult = {

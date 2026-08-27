@@ -2,48 +2,28 @@ const API = '';
 const USE_MOCK = false;
 const POLL_MS = 300;
 
-const MOCK_SUCCEEDED = {
-  tasks: [
-    {
-      id: 'task_01hxyz',
-      title: 'Fix Off-By-One Index in Array Parser',
-      prompt:
-        'The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.',
-      provider: 'codex',
-      status: 'succeeded',
-      currentIteration: 1,
-      maxIterations: 2,
-      workspaceDir: '/tmp/loopsync-workspaces/task_01hxyz',
-      logs: [
-        '[loop] attempt 1/2 writer=codex reviewer=claude',
-        '[writer] Updated parseIndex to return text.length.',
-        '[tests] pass exit=0',
-        '[review] REVIEW_OK',
-        '[git] committed 2e38bf1',
-      ],
-      reviewerProvider: 'claude',
-      steps: [
-        { id: 'writer', status: 'ok' },
-        { id: 'tests', status: 'ok' },
-        { id: 'review', status: 'ok' },
-        { id: 'git', status: 'ok' },
-      ],
-      diff: 'diff --git a/parse.js b/parse.js\n--- a/parse.js\n+++ b/parse.js\n@@ -1 +1 @@\n-export function parseIndex(text) { return text.length - 1; }\n+export function parseIndex(text) { return text.length; }\n',
-      commitSha: '2e38bf1086d1d962ddbb5fd06b3970769d32c637',
-    },
-  ],
-  slots: [
-    { provider: 'claude', isBusy: false },
-    { provider: 'codex', isBusy: false },
-  ],
-};
-
 const STATUS_LABELS = {
   queued: 'Queued',
   running: 'Running',
   retrying: 'Retrying',
-  succeeded: 'Succeeded',
+  succeeded: 'Done',
   failed: 'Failed',
+};
+
+const STEP_LABELS = {
+  writer: 'Write',
+  tests: 'Tests',
+  review: 'Review',
+  git: 'Save',
+};
+
+const ROLE_KICKER = {
+  plan: 'Plan',
+  writer: 'Writer',
+  tests: 'Tests',
+  review: 'Review',
+  git: 'Saved',
+  loop: 'Loop',
 };
 
 const els = {
@@ -62,21 +42,21 @@ const els = {
   job: document.getElementById('job'),
   status: document.getElementById('status'),
   attempt: document.getElementById('attempt'),
-  rolesLine: document.getElementById('rolesLine'),
   steps: document.getElementById('steps'),
+  timeline: document.getElementById('timeline'),
+  shaLine: document.getElementById('shaLine'),
   logs: document.getElementById('logs'),
   lastError: document.getElementById('lastError'),
-  lastErrorWrap: document.getElementById('lastErrorWrap'),
-  diff: document.getElementById('diff'),
-  diffWrap: document.getElementById('diffWrap'),
-  sha: document.getElementById('sha'),
-  shaWrap: document.getElementById('shaWrap'),
+  filesHint: document.getElementById('filesHint'),
+  fileTabs: document.getElementById('fileTabs'),
+  fileView: document.getElementById('fileView'),
+  filesEmpty: document.getElementById('filesEmpty'),
 };
 
 let lastTask = null;
 let reachable = true;
 let pollInFlight = false;
-let pollPaused = false;
+let selectedFile = null;
 
 function setUnreachable(isUnreachable) {
   reachable = !isUnreachable;
@@ -84,18 +64,8 @@ function setUnreachable(isUnreachable) {
 }
 
 function setFormError(message) {
-  if (!message) {
-    els.formError.hidden = true;
-    els.formError.textContent = '';
-    return;
-  }
-  els.formError.hidden = false;
-  els.formError.textContent = message;
-}
-
-function setHidden(el, hidden) {
-  if (!el) return;
-  el.hidden = hidden;
+  els.formError.hidden = !message;
+  els.formError.textContent = message || '';
 }
 
 function applySlotBusy(slots) {
@@ -114,104 +84,123 @@ function applySlotBusy(slots) {
 }
 
 function updateActions(task) {
-  const selected = els.provider.selectedOptions[0];
-  const selectedBusy = Boolean(selected?.disabled);
+  const selectedBusy = Boolean(els.provider.selectedOptions[0]?.disabled);
   const inFlight =
     task &&
     (task.status === 'queued' ||
       task.status === 'running' ||
       task.status === 'retrying');
-
   els.launch.disabled = !reachable || selectedBusy;
   els.cancel.disabled = !reachable || !inFlight;
   els.reset.disabled = !reachable;
 }
 
 function renderSteps(task) {
-  if (!els.steps) return;
   els.steps.replaceChildren();
-  const steps = Array.isArray(task?.steps)
-    ? task.steps
-    : [
-        { id: 'writer', status: 'pending' },
-        { id: 'tests', status: 'pending' },
-        { id: 'review', status: 'skipped' },
-        { id: 'git', status: 'pending' },
-      ];
+  const steps = task?.steps ?? [];
   for (const step of steps) {
     const li = document.createElement('li');
     li.className = `step ${step.status}`;
-    li.textContent = `${step.id} ${step.status}`;
+    li.textContent = `${STEP_LABELS[step.id] ?? step.id}`;
     els.steps.append(li);
   }
 }
 
-function rolesLine(task) {
-  const bits = [`writer ${task.provider}`];
-  if (task.orchestratorProvider) {
-    bits.unshift(`plan ${task.orchestratorProvider}`);
-  } else {
-    bits.unshift('orchestrator LoopSync');
+function renderTimeline(task) {
+  els.timeline.replaceChildren();
+  const events = Array.isArray(task?.timeline) ? task.timeline : [];
+  for (const event of events) {
+    const li = document.createElement('li');
+    const fail = /fail|reject|request/i.test(event.title);
+    li.className = `card ${event.role}${fail ? ' fail' : ''}`;
+    const kicker = document.createElement('p');
+    kicker.className = 'kicker';
+    kicker.textContent = ROLE_KICKER[event.role] ?? event.role;
+    const title = document.createElement('h3');
+    title.textContent = event.title;
+    const body = document.createElement('p');
+    body.textContent = event.body || '';
+    li.append(kicker, title);
+    if (event.body) li.append(body);
+    els.timeline.append(li);
   }
-  if (task.reviewerProvider) {
-    bits.push(`reviewer ${task.reviewerProvider}`);
-  } else {
-    bits.push('reviewer none');
+}
+
+function renderFiles(task) {
+  const files = Array.isArray(task?.outputFiles) ? task.outputFiles : [];
+  if (files.length === 0) {
+    els.fileTabs.hidden = true;
+    els.fileView.hidden = true;
+    els.filesEmpty.hidden = false;
+    els.filesHint.textContent = 'Output appears here';
+    els.fileTabs.replaceChildren();
+    els.fileView.textContent = '';
+    selectedFile = null;
+    return;
   }
-  bits.push('oracle node --test');
-  return bits.join(' · ');
+
+  els.filesEmpty.hidden = true;
+  els.fileTabs.hidden = false;
+  els.fileView.hidden = false;
+  els.filesHint.textContent = `${files.length} file${files.length === 1 ? '' : 's'}`;
+
+  if (!selectedFile || !files.some((file) => file.path === selectedFile)) {
+    selectedFile = files[0].path;
+  }
+
+  els.fileTabs.replaceChildren();
+  for (const file of files) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = file.path;
+    button.className = file.path === selectedFile ? 'active' : '';
+    button.addEventListener('click', () => {
+      selectedFile = file.path;
+      renderFiles(lastTask);
+    });
+    els.fileTabs.append(button);
+  }
+
+  const active = files.find((file) => file.path === selectedFile) ?? files[0];
+  els.fileView.textContent = active.content;
 }
 
 function render(snapshot) {
-  const slots = snapshot?.slots ?? [];
-  applySlotBusy(slots);
-
-  const tasks = snapshot?.tasks ?? [];
-  const task = tasks.at(-1);
-
-  lastTask = task ?? null;
+  applySlotBusy(snapshot?.slots ?? []);
+  const task = (snapshot?.tasks ?? []).at(-1) ?? null;
+  lastTask = task;
 
   if (!task) {
-    setHidden(els.empty, false);
-    setHidden(els.job, true);
-    els.status.textContent = '';
-    els.status.className = 'badge';
-    els.attempt.textContent = '';
-    if (els.rolesLine) els.rolesLine.textContent = '';
-    renderSteps(null);
-    els.logs.textContent = '';
-    els.lastError.textContent = '';
-    els.diff.textContent = '';
-    els.sha.textContent = '';
-    setHidden(els.lastErrorWrap, true);
-    setHidden(els.diffWrap, true);
-    setHidden(els.shaWrap, true);
+    els.empty.hidden = false;
+    els.job.hidden = true;
+    els.status.hidden = true;
+    renderFiles(null);
     updateActions(null);
     return;
   }
 
-  setHidden(els.empty, true);
-  setHidden(els.job, false);
-
-  const status = task.status;
-  els.status.className = `badge ${status}`;
-  els.status.textContent = STATUS_LABELS[status] ?? status;
-  els.attempt.textContent = `Attempt ${task.currentIteration}/${task.maxIterations}`;
-  if (els.rolesLine) els.rolesLine.textContent = rolesLine(task);
+  els.empty.hidden = true;
+  els.job.hidden = false;
+  els.status.hidden = false;
+  els.status.className = `badge ${task.status}`;
+  els.status.textContent = STATUS_LABELS[task.status] ?? task.status;
+  els.attempt.textContent =
+    task.status === 'queued'
+      ? 'Starting…'
+      : `Pass ${task.currentIteration} of ${task.maxIterations}`;
   renderSteps(task);
+  renderTimeline(task);
   els.logs.textContent = Array.isArray(task.logs) ? task.logs.join('\n') : '';
-  els.logs.scrollTop = els.logs.scrollHeight;
-
-  const showError = status === 'retrying' || status === 'failed';
-  setHidden(els.lastErrorWrap, !showError);
-  els.lastError.textContent = showError && task.lastError ? task.lastError : '';
-
-  const showSuccess = status === 'succeeded';
-  setHidden(els.diffWrap, !showSuccess);
-  setHidden(els.shaWrap, !showSuccess);
-  els.diff.textContent = showSuccess && task.diff ? task.diff : '';
-  els.sha.textContent = showSuccess && task.commitSha ? task.commitSha : '';
-
+  els.lastError.hidden = !task.lastError;
+  els.lastError.textContent = task.lastError || '';
+  if (task.commitSha) {
+    els.shaLine.hidden = false;
+    els.shaLine.textContent = `Snapshot ${task.commitSha.slice(0, 12)}`;
+  } else {
+    els.shaLine.hidden = true;
+    els.shaLine.textContent = '';
+  }
+  renderFiles(task);
   updateActions(task);
 }
 
@@ -220,24 +209,19 @@ async function readErrorMessage(res) {
     const body = await res.json();
     if (body?.error?.message) return body.error.message;
   } catch {
-    /* ignore non-JSON */
+    /* ignore */
   }
   return `Request failed (${res.status})`;
 }
 
 async function fetchState() {
-  if (USE_MOCK) {
-    return MOCK_SUCCEEDED;
-  }
   const res = await fetch(`${API}/api/state`);
-  if (!res.ok) {
-    throw new Error('state');
-  }
+  if (!res.ok) throw new Error('state');
   return res.json();
 }
 
 async function poll() {
-  if (pollPaused || pollInFlight) return;
+  if (pollInFlight) return;
   pollInFlight = true;
   try {
     const snapshot = await fetchState();
@@ -254,6 +238,7 @@ async function poll() {
 els.form.addEventListener('submit', async (event) => {
   event.preventDefault();
   setFormError('');
+  selectedFile = null;
   try {
     const res = await fetch(`${API}/api/tasks`, {
       method: 'POST',
@@ -278,8 +263,7 @@ els.form.addEventListener('submit', async (event) => {
     await poll();
   } catch {
     setUnreachable(true);
-    updateActions(lastTask);
-    setFormError('Cannot reach orchestrator on :4055');
+    setFormError('Can’t reach LoopSync on :4055');
   }
 });
 
@@ -290,48 +274,28 @@ els.cancel.addEventListener('click', async () => {
     const res = await fetch(`${API}/api/tasks/${lastTask.id}/cancel`, {
       method: 'POST',
     });
-    if (!res.ok) {
-      setFormError(await readErrorMessage(res));
-      return;
-    }
-    await poll();
+    if (!res.ok) setFormError(await readErrorMessage(res));
+    else await poll();
   } catch {
     setUnreachable(true);
-    updateActions(lastTask);
-    setFormError('Cannot reach orchestrator on :4055');
   }
 });
 
 els.reset.addEventListener('click', async () => {
   setFormError('');
+  selectedFile = null;
   try {
     const res = await fetch(`${API}/api/reset`, { method: 'POST' });
-    if (!res.ok) {
-      setFormError(await readErrorMessage(res));
-      return;
-    }
-    await poll();
+    if (!res.ok) setFormError(await readErrorMessage(res));
+    else await poll();
   } catch {
     setUnreachable(true);
-    updateActions(lastTask);
-    setFormError('Cannot reach orchestrator on :4055');
   }
 });
 
-els.provider.addEventListener('change', () => {
-  updateActions(lastTask);
-});
-els.reviewerProvider?.addEventListener('change', () => {
-  updateActions(lastTask);
-});
-els.orchestratorProvider?.addEventListener('change', () => {
-  updateActions(lastTask);
-});
+els.provider.addEventListener('change', () => updateActions(lastTask));
+els.reviewerProvider?.addEventListener('change', () => updateActions(lastTask));
+els.orchestratorProvider?.addEventListener('change', () => updateActions(lastTask));
 
 poll();
 setInterval(poll, POLL_MS);
-
-globalThis.render = render;
-globalThis.pausePoll = () => {
-  pollPaused = true;
-};

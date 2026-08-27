@@ -11,7 +11,9 @@ import {
   type StepId,
   type StepState,
   type StepStatus,
+  type TimelineEvent,
 } from '../../protocol/index.ts';
+import { extractUsefulCliText, isCliNoise } from './cli-log.ts';
 import type { Ledger } from './ledger.ts';
 import type { Store } from './state.ts';
 
@@ -102,11 +104,6 @@ async function executeLoop(opts: {
       oracleSha: oracle.oracleSha,
       capsRemaining: maxIterations,
     });
-    appendLine(
-      store,
-      taskId,
-      `[loop] workspace ${workspace.dir} branch ${workspace.branch}`,
-    );
     record('workspace', { detail: workspace.dir });
   } catch (err) {
     const message = errorMessage(err);
@@ -136,9 +133,7 @@ async function executeLoop(opts: {
     appendLine(
       store,
       taskId,
-      `[loop] attempt ${attempt}/${maxIterations} writer=${provider}` +
-        (reviewerProvider ? ` reviewer=${reviewerProvider}` : '') +
-        (orchestratorProvider ? ` orchestrator=${orchestratorProvider}` : ''),
+      `[loop] attempt ${attempt}/${maxIterations}`,
     );
     record('attempt', { attempt });
 
@@ -157,7 +152,12 @@ async function executeLoop(opts: {
           (text) => appendChunk(store, taskId, '[plan] ', text),
           signal,
         );
-        planText = planResult.output;
+        planText = extractUsefulCliText(planResult.output);
+        pushTimeline(store, taskId, {
+          role: 'plan',
+          title: `${orchestratorProvider} planned the work`,
+          body: planText,
+        });
         record('plan', { attempt, step: 'plan', detail: 'ok' });
       } catch (err) {
         if (isGone(store, taskId, signal)) {
@@ -190,13 +190,22 @@ async function executeLoop(opts: {
     }
 
     try {
-      await adapters[provider].run(
+      const writerResult = await adapters[provider].run(
         workspaceDir,
         writerPrompt,
         (text) => appendChunk(store, taskId, '[writer] ', text),
         signal,
       );
       setStep(store, taskId, 'writer', 'ok');
+      await refreshOutputs(store, git, taskId, workspaceDir);
+      pushTimeline(store, taskId, {
+        role: 'writer',
+        title:
+          attempt === 1
+            ? `${provider} wrote code`
+            : `${provider} revised the code`,
+        body: extractUsefulCliText(writerResult.output),
+      });
       record('writer', { attempt, step: 'writer' });
     } catch (err) {
       if (isGone(store, taskId, signal)) {
@@ -238,7 +247,6 @@ async function executeLoop(opts: {
       record('oracle_tampered', { attempt, step: 'oracle' });
       return;
     }
-    appendLine(store, taskId, `[loop] oracle ok sha=${oracle.oracleSha.slice(0, 12)}`);
 
     setStep(store, taskId, 'tests', 'running');
     store.updateTask(taskId, { currentStep: 'tests' });
@@ -263,12 +271,23 @@ async function executeLoop(opts: {
         setStep(store, taskId, 'review', 'skipped');
       }
       store.updateTask(taskId, { lastError: tests.output });
+      pushTimeline(store, taskId, {
+        role: 'tests',
+        title: 'Tests failed',
+        body: extractUsefulCliText(tests.output, 800),
+      });
+      await refreshOutputs(store, git, taskId, workspaceDir);
       record('tests_fail', { attempt, step: 'tests' });
       continue;
     }
 
     appendLine(store, taskId, `[tests] pass exit=${tests.exitCode}`);
     setStep(store, taskId, 'tests', 'ok');
+    pushTimeline(store, taskId, {
+      role: 'tests',
+      title: 'Tests passed',
+      body: 'The oracle accepted the change.',
+    });
     record('tests_pass', { attempt, step: 'tests' });
 
     if (reviewerProvider) {
@@ -278,17 +297,12 @@ async function executeLoop(opts: {
       }
       setStep(store, taskId, 'review', 'running');
       store.updateTask(taskId, { currentStep: 'review' });
-      appendLine(
-        store,
-        taskId,
-        `[review] adversarial pass via ${reviewerProvider}`,
-      );
       let reviewOutput = '';
       try {
         const diff = await git.getDiff(workspaceDir);
         const result = await adapters[reviewerProvider].run(
           workspaceDir,
-          reviewPrompt(diff),
+          reviewPrompt(diff, prompt),
           (text) => appendChunk(store, taskId, '[review] ', text),
           signal,
         );
@@ -308,16 +322,26 @@ async function executeLoop(opts: {
       const verdict = parseReviewVerdict(reviewOutput);
       store.updateTask(taskId, { lastReview: verdict });
       if (verdict !== 'ok') {
-        lastReviewOutput = reviewOutput;
+        lastReviewOutput = extractUsefulCliText(reviewOutput);
         appendLine(store, taskId, '[review] REVIEW_REJECT');
         setStep(store, taskId, 'review', 'fail');
         setStep(store, taskId, 'git', 'pending');
-        store.updateTask(taskId, { lastError: reviewOutput || 'REVIEW_REJECT' });
+        store.updateTask(taskId, { lastError: lastReviewOutput || 'REVIEW_REJECT' });
+        pushTimeline(store, taskId, {
+          role: 'review',
+          title: `${reviewerProvider} requested changes`,
+          body: lastReviewOutput,
+        });
         record('review_reject', { attempt, step: 'review' });
         continue;
       }
       appendLine(store, taskId, '[review] REVIEW_OK');
       setStep(store, taskId, 'review', 'ok');
+      pushTimeline(store, taskId, {
+        role: 'review',
+        title: `${reviewerProvider} approved`,
+        body: extractUsefulCliText(reviewOutput, 400) || 'REVIEW_OK',
+      });
       record('review_ok', { attempt, step: 'review' });
     } else {
       setStep(store, taskId, 'review', 'skipped');
@@ -340,6 +364,16 @@ async function executeLoop(opts: {
       }
       appendLine(store, taskId, `[git] committed ${commit.sha.slice(0, 7)}`);
       setStep(store, taskId, 'git', 'ok');
+      await refreshOutputs(store, git, taskId, workspaceDir);
+      const files = store.getTask(taskId)?.outputFiles ?? [];
+      pushTimeline(store, taskId, {
+        role: 'git',
+        title: 'Saved a snapshot',
+        body:
+          files.length > 0
+            ? files.map((file) => file.path).join(', ')
+            : commit.sha.slice(0, 7),
+      });
       store.updateTask(taskId, {
         status: 'succeeded',
         currentStep: 'done',
@@ -413,9 +447,41 @@ function appendChunk(
 ): void {
   const lines = chunk
     .split('\n')
-    .filter((line) => line.length > 0)
+    .filter((line) => line.length > 0 && !isCliNoise(line))
     .map((line) => `${prefix}${line}`);
   appendLines(store, taskId, lines);
+}
+
+async function refreshOutputs(
+  store: Store,
+  git: GitRuntime,
+  taskId: string,
+  workspaceDir: string,
+): Promise<void> {
+  try {
+    const outputFiles = await git.listOutputs(workspaceDir);
+    store.updateTask(taskId, { outputFiles });
+  } catch {
+    // keep last known files
+  }
+}
+
+function pushTimeline(
+  store: Store,
+  taskId: string,
+  event: Omit<TimelineEvent, 'id'>,
+): void {
+  const task = store.getTask(taskId);
+  if (!task) {
+    return;
+  }
+  const next: TimelineEvent = {
+    id: `${event.role}_${(task.timeline?.length ?? 0) + 1}`,
+    role: event.role,
+    title: event.title,
+    body: event.body,
+  };
+  store.updateTask(taskId, { timeline: [...(task.timeline ?? []), next] });
 }
 
 function appendLines(store: Store, taskId: string, lines: string[]): void {

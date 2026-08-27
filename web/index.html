@@ -8,20 +8,14 @@
   </head>
   <body>
     <div id="unreachable" class="banner" hidden>
-      Cannot reach orchestrator on :4055
+      Can’t reach LoopSync on :4055
     </div>
 
-    <main class="layout">
-      <section class="launch-panel" aria-labelledby="app-title">
+    <main class="shell">
+      <section class="composer" aria-labelledby="app-title">
         <header class="brand">
-          <p class="eyebrow">Mission control</p>
-          <h1 id="app-title">LoopSync</h1>
-          <p class="lede">
-            Pick an orchestrator, a writer, and a reviewer. LoopSync copies the
-            failing fixture, the writer edits production code, tests veto the
-            SHA, and a separate reviewer process audits green tests. Nobody
-            but LoopSync commits.
-          </p>
+          <p class="eyebrow">LoopSync</p>
+          <h1 id="app-title">New run</h1>
         </header>
 
         <form id="launch-form">
@@ -34,72 +28,78 @@
             value="Fix Off-By-One Index in Array Parser"
           />
 
-          <label for="prompt">Prompt</label>
-          <textarea id="prompt" name="prompt" rows="7">The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.</textarea>
+          <label for="prompt">What should change</label>
+          <textarea id="prompt" name="prompt" rows="8">The test in parse.test.js fails. Make parseIndex return the correct value so the test passes. Do not change the test. Do not ask questions. Do not run git commit.</textarea>
 
-          <fieldset class="roles">
-            <legend>Agents</legend>
-            <label for="orchestratorProvider">Orchestrator</label>
-            <select id="orchestratorProvider" name="orchestratorProvider">
-              <option value="" selected>LoopSync (Node harness)</option>
-              <option value="codex">codex — plan only</option>
-              <option value="claude">claude — plan only</option>
-            </select>
-
-            <label for="provider">Writer</label>
-            <select id="provider" name="provider">
-              <option value="codex" selected>codex</option>
-              <option value="claude">claude</option>
-            </select>
-
-            <label for="reviewerProvider">Reviewer</label>
-            <select id="reviewerProvider" name="reviewerProvider">
-              <option value="">none (tests only)</option>
-              <option value="claude" selected>claude — adversarial</option>
-              <option value="codex">codex — adversarial</option>
-            </select>
-          </fieldset>
+          <div class="role-grid">
+            <label>
+              Plan
+              <select id="orchestratorProvider" name="orchestratorProvider">
+                <option value="" selected>LoopSync</option>
+                <option value="codex">Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+            </label>
+            <label>
+              Write
+              <select id="provider" name="provider">
+                <option value="codex" selected>Codex</option>
+                <option value="claude">Claude</option>
+              </select>
+            </label>
+            <label>
+              Review
+              <select id="reviewerProvider" name="reviewerProvider">
+                <option value="">Tests only</option>
+                <option value="claude" selected>Claude</option>
+                <option value="codex">Codex</option>
+              </select>
+            </label>
+          </div>
 
           <p id="formError" class="form-error" hidden></p>
 
           <div class="actions">
-            <button type="submit" id="launch">Launch</button>
-            <button type="button" id="cancel">Cancel</button>
+            <button type="submit" id="launch">Run</button>
+            <button type="button" id="cancel">Stop</button>
             <button type="button" id="reset">Reset</button>
           </div>
         </form>
       </section>
 
-      <section class="status-panel" aria-labelledby="job-heading">
-        <h2 id="job-heading" class="visually-hidden">Job status</h2>
-        <p id="empty">No jobs yet. Launch a fix.</p>
-
-        <div id="job" hidden>
-          <div class="job-head">
-            <span id="status" class="badge"></span>
-            <p id="attempt"></p>
-          </div>
-          <p id="rolesLine" class="roles-line"></p>
-          <ol id="steps" class="steps" aria-label="Pipeline steps"></ol>
-
-          <h3>Logs</h3>
-          <pre id="logs"></pre>
-
-          <div id="lastErrorWrap" hidden>
-            <h3>Last error</h3>
-            <pre id="lastError"></pre>
-          </div>
-
-          <div id="diffWrap" hidden>
-            <h3>Diff</h3>
-            <pre id="diff"></pre>
-          </div>
-
-          <div id="shaWrap" hidden>
-            <h3>Commit SHA</h3>
-            <code id="sha"></code>
-          </div>
+      <section class="activity" aria-labelledby="activity-heading">
+        <div class="activity-head">
+          <h2 id="activity-heading">Activity</h2>
+          <span id="status" class="badge" hidden></span>
         </div>
+        <p id="empty" class="empty">
+          Describe the change, pick who plans, writes, and reviews, then run.
+          Tests stay locked. The code shows up on the right.
+        </p>
+        <div id="job" hidden>
+          <p id="attempt" class="attempt"></p>
+          <ol id="steps" class="steps" aria-label="Pipeline"></ol>
+          <ol id="timeline" class="timeline"></ol>
+          <p id="shaLine" class="sha-line" hidden></p>
+          <details id="debug">
+            <summary>Technical details</summary>
+            <pre id="logs"></pre>
+            <pre id="lastError" hidden></pre>
+          </details>
+        </div>
+      </section>
+
+      <section class="files" aria-labelledby="files-heading">
+        <div class="files-head">
+          <h2 id="files-heading">Code</h2>
+          <p id="filesHint" class="files-hint">Output appears here</p>
+        </div>
+        <div id="fileTabs" class="file-tabs" hidden></div>
+        <pre id="fileView" class="file-view" hidden></pre>
+        <p id="filesEmpty" class="empty">
+          After the writer runs, changed files open here — including new files
+          like a Python module, not just the git diff.
+        </p>
       </section>
     </main>
 

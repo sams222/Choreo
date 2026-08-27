@@ -45,6 +45,20 @@ export interface TaskState {
   oracleSha?: string;
   capsRemaining?: number;
   lastReview?: ReviewVerdict;
+  timeline?: TimelineEvent[];
+  outputFiles?: OutputFile[];
+}
+
+export interface TimelineEvent {
+  id: string;
+  role: 'plan' | 'writer' | 'tests' | 'review' | 'git' | 'loop';
+  title: string;
+  body: string;
+}
+
+export interface OutputFile {
+  path: string;
+  content: string;
 }
 
 export interface ProviderSlot {
@@ -98,6 +112,8 @@ export interface GitRuntime {
   resetAll(): Promise<void>;
   /** True if oracle paths (parse.test.js) differ from the fixture baseline. */
   checkOracle(dir: string): Promise<{ dirty: boolean; oracleSha: string }>;
+  /** Changed/new production files vs the fixture (never oracle tests). */
+  listOutputs(dir: string): Promise<OutputFile[]>;
 }
 
 export interface LaunchTaskBody {
@@ -211,17 +227,20 @@ ${plan}
 Follow the plan. Do not change the test. Do not ask questions. Do not run git commit.`;
 }
 
-export function reviewPrompt(diff: string): string {
+export function reviewPrompt(diff: string, userTask: string): string {
   return `You are an adversarial reviewer in a separate context from the writer. You did not write this code. Your only job is to find bugs and reasons the change does not work.
 
-Read parse.js, parse.test.js, and this diff. Do not change any files. Do not run git commit. Do not change the test.
+User task:
+${userTask}
+
+Inspect the workspace and this diff. Do not change any files. Do not run git commit. Do not change test files.
 
 DIFF:
 ${diff || '(no unstaged diff)'}
 
-The tests already passed. You are a second gate. You cannot override red tests (you are not invoked when tests fail).
+The automated tests already passed. You are a second gate and cannot override red tests.
 
-If production code correctly makes parseIndex('abcde') === 5 without changing the test, emit a line that is exactly:
+If the changes correctly satisfy the user task without cheating the tests, emit a line that is exactly:
 ${REVIEW_OK}
 
 Otherwise emit a line that is exactly:

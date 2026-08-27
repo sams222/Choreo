@@ -19,6 +19,8 @@ function cloneTask(task: TaskState): TaskState {
     ...task,
     logs: [...task.logs],
     steps: task.steps?.map((step) => ({ ...step })),
+    timeline: task.timeline?.map((item) => ({ ...item })),
+    outputFiles: task.outputFiles?.map((file) => ({ ...file })),
   };
 }
 
@@ -67,6 +69,8 @@ export function createStore() {
           { id: 'review', status: hasReviewer ? 'pending' : 'skipped' },
           { id: 'git', status: 'pending' },
         ],
+        timeline: [],
+        outputFiles: [],
       };
       tasks = [...tasks, task];
       return cloneTask(task);
@@ -90,6 +94,12 @@ export function createStore() {
         steps: patch.steps
           ? patch.steps.map((step) => ({ ...step }))
           : current.steps?.map((step) => ({ ...step })),
+        timeline: patch.timeline
+          ? patch.timeline.map((item) => ({ ...item }))
+          : current.timeline?.map((item) => ({ ...item })),
+        outputFiles: patch.outputFiles
+          ? patch.outputFiles.map((file) => ({ ...file }))
+          : current.outputFiles?.map((file) => ({ ...file })),
       };
       tasks = tasks.map((item, i) => (i === index ? next : item));
       return cloneTask(next);
